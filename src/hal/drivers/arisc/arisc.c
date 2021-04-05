@@ -270,8 +270,8 @@ int32_t malloc_and_export(const char *comp_name, int32_t comp_id)
         EXPORT_PIN(HAL_IN,u32,dir_port,"dir-port", UINT32_MAX);
         EXPORT_PIN(HAL_IN,u32,dir_pin,"dir-pin", UINT32_MAX);
         EXPORT_PIN(HAL_IN,bit,dir_inv,"dir-invert", 0);
-        EXPORT_PIN(HAL_IN,u32,dir_pin,"dir-hold", 50000);
-        EXPORT_PIN(HAL_IN,u32,dir_pin,"dir-setup", 50000);
+        EXPORT_PIN(HAL_IN,u32,dir_hold,"dir-hold", 50000);
+        EXPORT_PIN(HAL_IN,u32,dir_setup,"dir-setup", 50000);
         EXPORT_PIN(HAL_IN,float,pos_scale,"position-scale", 1.0);
         EXPORT_PIN(HAL_OUT,float,pos_fb,"position-fb", 0.0);
         EXPORT_PIN(HAL_OUT,float,freq,"frequency", 0.0);
