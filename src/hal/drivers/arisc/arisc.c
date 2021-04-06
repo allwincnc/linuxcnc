@@ -57,7 +57,7 @@ typedef struct
     hal_u32_t *pwm_port; // in
     hal_u32_t *pwm_pin; // in
     hal_bit_t *pwm_inv; // in
-    hal_u32_t *pwm_duty; // in
+    hal_u32_t *pwm_duty; // TODO - must be float
 
     hal_u32_t *dir_port; // in
     hal_u32_t *dir_pin; // in
@@ -65,9 +65,10 @@ typedef struct
     hal_u32_t *dir_hold; // in
     hal_u32_t *dir_setup; // in
 
-    hal_float_t *pos_scale; // in
+    hal_float_t *pos_scale; // TODO - rename to `scale` for usage with all cmds
     hal_float_t *pos_cmd; // in
     hal_float_t *vel_cmd; // in
+    // TODO - add `freq_cmd`
 
     hal_s32_t *counts; // out
     hal_float_t *pos_fb; // out
@@ -93,6 +94,7 @@ static pwm_ch_shmem_t *pwmh;
 static pwm_ch_priv_t pwmp[PWM_CH_MAX_CNT] = {0};
 static uint8_t pwm_cnt = 0;
 
+// TODO - rename these to something human-like
 #define gh *pwmh[ch]
 #define ggh pwmh[ch]
 #define gp pwmp[ch]
