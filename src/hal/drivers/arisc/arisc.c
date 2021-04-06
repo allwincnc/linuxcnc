@@ -57,47 +57,71 @@ typedef struct
     hal_u32_t *pwm_port; // in
     hal_u32_t *pwm_pin; // in
     hal_bit_t *pwm_inv; // in
-    hal_u32_t *pwm_duty; // TODO - must be float
 
     hal_u32_t *dir_port; // in
     hal_u32_t *dir_pin; // in
     hal_bit_t *dir_inv; // in
-    hal_u32_t *dir_hold; // in
-    hal_u32_t *dir_setup; // in
+    hal_u32_t *dir_hold; // io
+    hal_u32_t *dir_setup; // io
 
-    hal_float_t *pos_scale; // TODO - rename to `scale` for usage with all cmds
+    hal_float_t *dc; // in
+    hal_float_t *dc_min; // io
+    hal_float_t *dc_max; // io
+    hal_float_t *dc_offset; // io
+    hal_float_t *dc_scale; // io
+
+    hal_float_t *cmd_scale; // io
     hal_float_t *pos_cmd; // in
     hal_float_t *vel_cmd; // in
-    // TODO - add `freq_cmd`
+    hal_float_t *freq_cmd; // io
 
-    hal_s32_t *counts; // out
+    hal_float_t *dc_fb; // out
     hal_float_t *pos_fb; // out
-    hal_float_t *freq; // out
-} pwm_ch_shmem_t;
+    hal_float_t *vel_fb; // out
+    hal_float_t *freq_fb; // out
+    hal_s32_t *counts; // out
+}
+pwm_ch_shmem_t;
 
 typedef struct
 {
-    hal_bit_t ctrl_type;
+    hal_u32_t ctrl_type;
 
-    hal_s32_t pwm_pos_cmd;
-    hal_u32_t pwm_port_old;
-    hal_u32_t pwm_pin_old;
-    hal_bit_t pwm_inv_old;
+    hal_u32_t pwm_port;
+    hal_u32_t pwm_pin;
+    hal_bit_t pwm_inv;
 
-    hal_u32_t dir;
-    hal_u32_t dir_port_old;
-    hal_u32_t dir_pin_old;
-    hal_bit_t dir_inv_old;
-} pwm_ch_priv_t;
+    hal_u32_t dir_port;
+    hal_u32_t dir_pin;
+    hal_bit_t dir_inv;
+
+    hal_s32_t dc_s32;
+    hal_float_t dc;
+    hal_float_t dc_min;
+    hal_float_t dc_max;
+    hal_float_t dc_offset;
+    hal_float_t dc_scale;
+
+    hal_float_t cmd_scale;
+    hal_float_t pos_cmd;
+    hal_float_t vel_cmd;
+    hal_float_t freq_cmd;
+}
+pwm_ch_priv_t;
 
 static pwm_ch_shmem_t *pwmh;
 static pwm_ch_priv_t pwmp[PWM_CH_MAX_CNT] = {0};
 static uint8_t pwm_cnt = 0;
 
-// TODO - rename these to something human-like
-#define gh *pwmh[ch]
-#define ggh pwmh[ch]
-#define gp pwmp[ch]
+#define ph *pwmh[ch] // `ph` means `PWM HAL`
+#define pp pwmp[ch] // `pp` means `PWM Private`
+
+enum
+{
+    PWM_CTRL_BY_POS,
+    PWM_CTRL_BY_VEL,
+    PWM_CTRL_BY_FREQ
+};
 
 
 
@@ -246,8 +270,9 @@ int32_t malloc_and_export(const char *comp_name, int32_t comp_id)
     {
         if ( data != NULL ) data = NULL;
 
-        if      ( token[0] == 'P' || token[0] == 'p' ) type[pwm_cnt++] = 0;
-        else if ( token[0] == 'V' || token[0] == 'v' ) type[pwm_cnt++] = 1;
+        if      ( token[0] == 'P' || token[0] == 'p' ) type[pwm_cnt++] = PWM_CTRL_BY_POS;
+        else if ( token[0] == 'V' || token[0] == 'v' ) type[pwm_cnt++] = PWM_CTRL_BY_VEL;
+        else if ( token[0] == 'F' || token[0] == 'f' ) type[pwm_cnt++] = PWM_CTRL_BY_FREQ;
     }
     if ( !pwm_cnt ) return 0;
     if ( pwm_cnt > PWM_CH_MAX_CNT ) pwm_cnt = PWM_CH_MAX_CNT;
@@ -258,40 +283,64 @@ int32_t malloc_and_export(const char *comp_name, int32_t comp_id)
 
     // export PWM HAL pins and set default values
     #define EXPORT_PIN(IO_TYPE,VAR_TYPE,VAL,NAME,DEFAULT) \
-        r += hal_pin_##VAR_TYPE##_newf(IO_TYPE, &(ggh.VAL), comp_id,\
+        r += hal_pin_##VAR_TYPE##_newf(IO_TYPE, &(pwmh[ch].VAL), comp_id,\
         "%s.%d." NAME, comp_name, ch);\
-        gh.VAL = DEFAULT;
+        ph.VAL = DEFAULT;
 
     for ( r = 0, ch = pwm_cnt; ch--; )
     {
+        // public HAL data
         EXPORT_PIN(HAL_IN,bit,enable,"enable", 0);
+
         EXPORT_PIN(HAL_IN,u32,pwm_port,"pwm-port", UINT32_MAX);
         EXPORT_PIN(HAL_IN,u32,pwm_pin,"pwm-pin", UINT32_MAX);
         EXPORT_PIN(HAL_IN,bit,pwm_inv,"pwm-invert", 0);
-        EXPORT_PIN(HAL_IN,u32,pwm_duty,"pwm-duty", UINT32_MAX/2);
+
         EXPORT_PIN(HAL_IN,u32,dir_port,"dir-port", UINT32_MAX);
         EXPORT_PIN(HAL_IN,u32,dir_pin,"dir-pin", UINT32_MAX);
         EXPORT_PIN(HAL_IN,bit,dir_inv,"dir-invert", 0);
-        EXPORT_PIN(HAL_IN,u32,dir_hold,"dir-hold", 50000);
-        EXPORT_PIN(HAL_IN,u32,dir_setup,"dir-setup", 50000);
-        EXPORT_PIN(HAL_IN,float,pos_scale,"position-scale", 1.0);
-        EXPORT_PIN(HAL_OUT,float,pos_fb,"position-fb", 0.0);
-        EXPORT_PIN(HAL_OUT,float,freq,"frequency", 0.0);
+        EXPORT_PIN(HAL_IO,u32,dir_hold,"dir-hold", 50000);
+        EXPORT_PIN(HAL_IO,u32,dir_setup,"dir-setup", 50000);
+
+        EXPORT_PIN(HAL_IN,float,dc,"dc", 0.0);
+        EXPORT_PIN(HAL_IO,float,dc_min,"dc-min", -1.0);
+        EXPORT_PIN(HAL_IO,float,dc_max,"dc-max", 1.0);
+        EXPORT_PIN(HAL_IO,float,dc_offset,"dc-offset", 0.0);
+        EXPORT_PIN(HAL_IO,float,dc_scale,"dc-scale", 1.0);
+
+        EXPORT_PIN(HAL_IO,float,cmd_scale,"cmd-scale", 1.0);
+        EXPORT_PIN(HAL_IN,float,pos_cmd,"pos-cmd", 0.0);
+        EXPORT_PIN(HAL_IN,float,vel_cmd,"vel-cmd", 0.0);
+        EXPORT_PIN(HAL_IO,float,freq_cmd,"freq-cmd", 0.0);
+
+        EXPORT_PIN(HAL_OUT,float,dc_fb,"dc-fb", 0.0);
+        EXPORT_PIN(HAL_OUT,float,pos_fb,"pos-fb", 0.0);
+        EXPORT_PIN(HAL_OUT,float,vel_fb,"vel-fb", 0.0);
+        EXPORT_PIN(HAL_OUT,float,freq_fb,"freq-fb", 0.0);
         EXPORT_PIN(HAL_OUT,s32,counts,"counts", 0);
 
-        if ( type[ch] ) { EXPORT_PIN(HAL_IN,float,vel_cmd,"velocity-cmd", 0.0); }
-        else            { EXPORT_PIN(HAL_IN,float,pos_cmd,"position-cmd", 0.0); }
+        // private data
+        pp.ctrl_type = type[ch];
 
-        gp.ctrl_type = type[ch];
+        pp.pwm_port = UINT32_MAX;
+        pp.pwm_pin = UINT32_MAX;
+        pp.pwm_inv = 0;
 
-        gp.pwm_pos_cmd = 0;
-        gp.pwm_inv_old = 0;
-        gp.pwm_pin_old = UINT32_MAX;
-        gp.pwm_port_old = UINT32_MAX;
+        pp.dir_port = UINT32_MAX;
+        pp.dir_pin = UINT32_MAX;
+        pp.dir_inv = 0;
 
-        gp.dir_inv_old = 0;
-        gp.dir_pin_old = UINT32_MAX;
-        gp.dir_port_old = UINT32_MAX;
+        pp.dc_s32 = 0;
+        pp.dc = 0.0;
+        pp.dc_scale = 1.0;
+        pp.dc_offset = 0.0;
+        pp.dc_min = -1.0;
+        pp.dc_max = 1.0;
+
+        pp.cmd_scale = 1.0;
+        pp.pos_cmd = 0.0;
+        pp.vel_cmd = 0.0;
+        pp.freq_cmd = 0.0;
     }
     if ( r )
     {
@@ -437,74 +486,82 @@ void gpio_write(void *arg, long period)
 }
 
 static inline
-void pwm_update_pos_scale(uint8_t ch)
+void pwm_dc_update(uint8_t ch)
 {
-    if ( gh.pos_scale < 0 || (gh.pos_scale < 1e-20 && gh.pos_scale > -1e-20) )
-    {
-        gh.pos_scale = 1.0;
-    }
+    if ( ph.dc        == pp.dc &&
+         ph.dc_scale  == pp.dc_scale &&
+         ph.dc_offset == pp.dc_offset &&
+         ph.dc_min    == pp.dc_min &&
+         ph.dc_max    == pp.dc_max ) return;
+
+    if ( ph.dc_min < -1.0 ) ph.dc_min = -1.0;
+    if ( ph.dc_max > 1.0 ) ph.dc_max = 1.0;
+    if ( ph.dc_scale < 1e-20 && ph.dc_scale > -1e-20 ) ph.dc_scale = 1.0;
+
+    ph.dc_fb = ph.dc / ph.dc_scale + ph.dc_offset;
+
+    if ( ph.dc_fb < ph.dc_min ) ph.dc_fb = ph.dc_min;
+    if ( ph.dc_fb > ph.dc_max ) ph.dc_fb = ph.dc_max;
+
+    pp.dc_s32 = (int32_t) (ph.dc_fb * INT32_MAX);
 }
 
 static inline
-void pwm_update_pins(uint8_t ch)
+void pwm_pins_update(uint8_t ch)
 {
-    if ( gh.pwm_port != gp.pwm_port_old ||
-         gh.pwm_pin  != gp.pwm_pin_old ||
-         gh.pwm_inv  != gp.pwm_inv_old ||
-         gh.dir_port != gp.dir_port_old ||
-         gh.dir_pin  != gp.dir_pin_old ||
-         gh.dir_inv  != gp.dir_inv_old ) return 0;
+    if ( ph.pwm_port == pp.pwm_port &&
+         ph.pwm_pin  == pp.pwm_pin &&
+         ph.pwm_inv  == pp.pwm_inv &&
+         ph.dir_port == pp.dir_port &&
+         ph.dir_pin  == pp.dir_pin &&
+         ph.dir_inv  == pp.dir_inv ) return;
 
-    if ( gh.pwm_port < GPIO_PORTS_MAX_CNT && gh.pwm_pin < GPIO_PINS_MAX_CNT )
+    if ( ph.pwm_port < GPIO_PORTS_MAX_CNT && ph.pwm_pin < GPIO_PINS_MAX_CNT )
     {
-        gp.pwm_port_old = gh.pwm_port;
-        gp.pwm_pin_old  = gh.pwm_pin;
-        gp.pwm_inv_old  = gh.pwm_inv;
+        pp.pwm_port = ph.pwm_port;
+        pp.pwm_pin  = ph.pwm_pin;
+        pp.pwm_inv  = ph.pwm_inv;
     }
     else
     {
-        gh.pwm_port = gp.pwm_port_old;
-        gh.pwm_pin = gp.pwm_pin_old;
-        gh.pwm_inv = gp.pwm_inv_old;
+        ph.pwm_port = pp.pwm_port;
+        ph.pwm_pin = pp.pwm_pin;
+        ph.pwm_inv = pp.pwm_inv;
     }
 
-    if ( gh.dir_port < GPIO_PORTS_MAX_CNT && gh.dir_pin < GPIO_PINS_MAX_CNT )
+    if ( ph.dir_port < GPIO_PORTS_MAX_CNT && ph.dir_pin < GPIO_PINS_MAX_CNT )
     {
-        gp.dir_port_old = gh.dir_port;
-        gp.dir_pin_old  = gh.dir_pin;
-        gp.dir_inv_old  = gh.dir_inv;
+        pp.dir_port = ph.dir_port;
+        pp.dir_pin  = ph.dir_pin;
+        pp.dir_inv  = ph.dir_inv;
     }
     else
     {
-        gh.dir_port = gp.dir_port_old;
-        gh.dir_pin = gp.dir_pin_old;
-        gh.dir_inv = gp.dir_inv_old;
+        ph.dir_port = pp.dir_port;
+        ph.dir_pin = pp.dir_pin;
+        ph.dir_inv = pp.dir_inv;
     }
 
-    pwm_ch_pins_setup(ch,
-        gh.pwm_port, gh.pwm_pin, gh.pwm_inv,
-        gh.dir_port, gh.dir_pin, gh.dir_inv,
-        0);
+    pwm_ch_pins_setup(ch, ph.pwm_port, ph.pwm_pin, ph.pwm_inv,
+                          ph.dir_port, ph.dir_pin, ph.dir_inv, 0);
 }
 
 static
 void pwm_read(void *arg, long period)
 {
-    static uint8_t ch;
-    static hal_s32_t pos_cmd_counts;
+    static int32_t counts, ch;
 
     for ( ch = pwm_cnt; ch--; )
     {
-        if ( !gh.enable ) continue;
+        if ( !ph.enable ) continue;
 
-        pwm_update_pos_scale(ch);
-        gh.counts = pwm_ch_pos_get(ch, 0);
-        gh.pos_fb = ((hal_float_t)gh.counts) / gh.pos_scale;
+        ph.counts = pwm_ch_pos_get(ch, 0);
 
-        if ( !gp.ctrl_type ) // position mode
-        {
-            pos_cmd_counts = (hal_s32_t) round(gh.pos_scale * gh.pos_cmd);
-            if ( pos_cmd_counts == gh.counts ) gh.pos_fb = gh.pos_cmd;
+        if ( pp.ctrl_type == PWM_CTRL_BY_POS ) {
+            if ( ph.cmd_scale < 1e-20 && ph.cmd_scale > -1e-20 ) ph.cmd_scale = 1.0;
+            ph.pos_fb = ((hal_float_t)ph.counts) / ph.cmd_scale;
+            counts = (hal_s32_t) round(ph.cmd_scale * ph.pos_cmd);
+            if ( counts == ph.counts ) ph.pos_fb = ph.pos_cmd;
         }
     }
 }
@@ -512,52 +569,43 @@ void pwm_read(void *arg, long period)
 static
 void pwm_write(void *arg, long period)
 {
-    static uint32_t ch;
-    static int32_t freq;
+    static int32_t freq, counts, ch;
 
-    for ( ch = pwm_cnt; ch--; )
+    for ( ch = pwm_cnt, freq = 0; ch--; freq = 0 )
     {
-        if ( !gh.enable ) {
-            gh.freq = 0;
-            pwm_ch_times_setup(ch,0,0,0,0,0);
-            continue;
-        }
+        if ( !ph.enable ) goto pwm_times_setup;
 
-        pwm_update_pins(ch);
-        pwm_update_pos_scale(ch);
+        pwm_pins_update(ch);
+        pwm_dc_update(ch);
 
-        if ( gp.ctrl_type ) // velocity mode
+        switch ( pp.ctrl_type )
         {
-            // stop any movement if velocity value is too small
-            if ( gh.vel_cmd < 1e-20 && gh.vel_cmd > -1e-20 ) {
-                gh.freq = 0;
-                pwm_ch_times_setup(ch,0,0,0,0,0);
-                continue;
-            } else {
-                gh.freq = gh.pos_scale * gh.vel_cmd;
-                freq = (int32_t) round(gh.freq);
+            case PWM_CTRL_BY_POS: {
+                counts = (hal_s32_t) round(ph.cmd_scale * ph.pos_cmd);
+                freq = (int32_t) (
+                    ((int64_t)(counts - ph.counts)) *
+                    ((int64_t)period) /
+                    ((int64_t)1000000) );
+                break;
             }
-        }
-        else // position mode
-        {
-            gp.pwm_pos_cmd = (hal_s32_t) round(gh.pos_scale * gh.pos_cmd);
-            freq = (int32_t) (
-                ((int64_t)(gp.pwm_pos_cmd - gh.counts)) *
-                ((int64_t)period) /
-                ((int64_t)1000000)
-            );
-
-            // stop any movement if velocity value is too small
-            if ( !freq ) {
-                gh.freq = 0;
-                pwm_ch_times_setup(ch,0,0,0,0,0);
-                continue;
-            } else {
-                gh.freq = (hal_float_t) freq;
+            case PWM_CTRL_BY_VEL: {
+                if ( ph.vel_cmd < 1e-20 && ph.vel_cmd > -1e-20 ) goto pwm_times_setup;
+                freq = (int32_t) round(ph.cmd_scale * ph.vel_cmd);
+                ph.vel_fb = (hal_float_t) freq;
+                break;
+            }
+            case PWM_CTRL_BY_FREQ: {
+                if ( ph.freq_cmd < 1e-20 && ph.freq_cmd > -1e-20 ) goto pwm_times_setup;
+                freq = (int32_t) round(ph.freq_fb);
+                ph.freq_fb = (hal_float_t) freq;
+                break;
             }
         }
 
-        if ( freq ) pwm_ch_times_setup(ch, freq, gh.pwm_duty, gh.dir_hold, gh.dir_setup, 1);
+        pwm_times_setup:
+
+        if ( freq ) pwm_ch_times_setup(ch, freq, pp.dc_s32, ph.dir_hold, ph.dir_setup, 1);
+        else        pwm_ch_times_setup(ch,    0,         0,           0,            0, 0);
     }
 }
 
