@@ -488,7 +488,7 @@ int32_t pwm_ch_pins_setup (
 static inline
 int32_t pwm_ch_times_setup (
     uint32_t c,
-    int32_t p_freq_hz, uint32_t p_duty_u32,
+    int32_t p_freq_mHz, int32_t p_duty_s32,
     uint32_t d_hold_ns, uint32_t d_setup_ns,
     uint32_t safe )
 {
@@ -503,7 +503,7 @@ int32_t pwm_ch_times_setup (
 
     ch_cnt = *_pwmd[PWM_CH_CNT];
 
-    if ( !p_freq_hz || !p_duty_u32 )
+    if ( !p_freq_mHz || !p_duty_s32 )
     {
         if ( !(*_pwmc[c][PWM_CH_P_BUSY]) || *_pwmc[c][PWM_CH_P_STOP] ) return 0;
         if ( (c+1) == ch_cnt )
@@ -521,17 +521,24 @@ int32_t pwm_ch_times_setup (
 
     if ( c >= ch_cnt ) ch_cnt = c + 1;
 
-    p_period = ARISC_CPU_FREQ / (p_freq_hz < 0 ? -p_freq_hz : p_freq_hz);
+    d_change = (p_freq_mHz > 0 && (*_pwmc[c][PWM_CH_D])) ||
+               (p_freq_mHz < 0 && !(*_pwmc[c][PWM_CH_D])) ? 1 : 0;
+    d_change = (p_duty_s32 > 0 && (*_pwmc[c][PWM_CH_D])) ||
+               (p_duty_s32 < 0 && !(*_pwmc[c][PWM_CH_D])) ?
+                   (d_change ? 0 : 1) :
+                   (d_change ? 1 : 0) ;
+
+    p_duty_s32 = p_duty_s32 < 0 ? -p_duty_s32 : p_duty_s32;
+
+    p_period = ARISC_CPU_FREQ / (p_freq_mHz < 0 ? -p_freq_mHz : p_freq_mHz) / 1000;
     p_period = p_period < (2*ARISC_WASTED_TICKS) ? 0 : p_period - (2*ARISC_WASTED_TICKS);
-    p_t1 = (uint32_t) ( ((uint64_t)p_period) * ((uint64_t)p_duty_u32) / ((uint64_t)UINT32_MAX) );
+    p_t1 = (uint32_t) ( ((uint64_t)p_period) * ((uint64_t)p_duty_s32) / ((uint64_t)INT32_MAX) );
     p_t0 = p_period - p_t1;
 
     d_t0 = ARISC_CPU_FREQ / (1000000000 / d_hold_ns);
     d_t0 = d_t0 < ARISC_WASTED_TICKS ? 0 : d_t0 - ARISC_WASTED_TICKS;
     d_t1 = ARISC_CPU_FREQ / (1000000000 / d_setup_ns);
     d_t1 = d_t1 < ARISC_WASTED_TICKS ? 0 : d_t1 - ARISC_WASTED_TICKS;
-    d_change = (p_freq_hz > 0 && (*_pwmc[c][PWM_CH_D])) ||
-               (p_freq_hz < 0 && !(*_pwmc[c][PWM_CH_D])) ? 1 : 0;
 
     _spin_lock();
     *_pwmc[c][PWM_CH_P_BUSY] = 1;
