@@ -529,8 +529,9 @@ int32_t pwm_ch_times_setup (
                    (d_change ? 1 : 0) ;
 
     p_duty_s32 = p_duty_s32 < 0 ? -p_duty_s32 : p_duty_s32;
+    p_freq_mHz = p_freq_mHz < 0 ? -p_freq_mHz : p_freq_mHz;
 
-    p_period = ARISC_CPU_FREQ / (p_freq_mHz < 0 ? -p_freq_mHz : p_freq_mHz) / 1000;
+    p_period = (uint32_t) ( ((uint64_t)ARISC_CPU_FREQ) * ((uint64_t)1000) / ((uint64_t)p_freq_mHz) );
     p_period = p_period < (2*ARISC_WASTED_TICKS) ? 0 : p_period - (2*ARISC_WASTED_TICKS);
     p_t1 = (uint32_t) ( ((uint64_t)p_period) * ((uint64_t)p_duty_s32) / ((uint64_t)INT32_MAX) );
     p_t0 = p_period - p_t1;
