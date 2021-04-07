@@ -504,6 +504,11 @@ void pwm_dc_update(uint8_t ch)
     if ( ph.dc_fb > ph.dc_max ) ph.dc_fb = ph.dc_max;
 
     pp.dc_s32 = (int32_t) (ph.dc_fb * INT32_MAX);
+    pp.dc = ph.dc;
+    pp.dc_min = ph.dc_min;
+    pp.dc_max = ph.dc_max;
+    pp.dc_offset = ph.dc_offset;
+    pp.dc_scale = ph.dc_scale;
 }
 
 static inline
