@@ -600,7 +600,7 @@ int32_t shmem_init(const char *comp_name)
     addr = PWM_SHM_BASE & ~(4096 - 1);
     off = PWM_SHM_BASE & (4096 - 1);
     _shm_vrt_addr = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, mem_fd, addr);
-    if (_shm_vrt_addr == MAP_FAILED) { printf("ERROR: shm mmap() failed\n"); return; }
+    if (_shm_vrt_addr == MAP_FAILED) PRINT_ERROR_AND_RETURN("ERROR: shm mmap() failed\n",-1);
     p = _shm_vrt_addr + off/4;
     for ( name = 0; name < PWM_DATA_CNT; name++, p++ ) _pwmd[name] = p;
     for ( ch = 0; ch < PWM_CH_MAX_CNT; ch++ ) {

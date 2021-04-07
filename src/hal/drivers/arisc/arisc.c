@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include "rtapi.h"
 #include "rtapi_app.h"
+#include "rtapi_math.h"
 #include "hal.h"
 
 #include "api.h"
@@ -353,9 +354,9 @@ int32_t malloc_and_export(const char *comp_name, int32_t comp_id)
     // export HAL functions
     r = 0;
     rtapi_snprintf(name, sizeof(name), "%s.write", comp_name);
-    r += hal_export_funct(name, gpio_write, 0, 0, 0, comp_id);
+    r += hal_export_funct(name, comp_write, 0, 0, 0, comp_id);
     rtapi_snprintf(name, sizeof(name), "%s.read", comp_name);
-    r += hal_export_funct(name, gpio_read, 0, 0, 0, comp_id);
+    r += hal_export_funct(name, comp_read, 0, 0, 0, comp_id);
     if ( r )
     {
         rtapi_print_msg(RTAPI_MSG_ERR, "%s: HAL functions export failed\n", comp_name);
