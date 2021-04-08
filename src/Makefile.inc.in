@@ -1,6 +1,6 @@
 #                                                     -*-makefile-gmake-*-
 #
-# @configure_input@ 
+# @configure_input@
 # on @DATE@
 #
 
@@ -125,7 +125,7 @@ CFLAGS = @CFLAGS@
 LDFLAGS = @LDFLAGS@
 endif
 RANLIB = @RANLIB@
-RANLIBFLAGS = 
+RANLIBFLAGS =
 MSGFMT = @MSGFMT@
 XGETTEXT = @XGETTEXT@
 LIBDL = @LIBDL@
@@ -223,6 +223,7 @@ CONFIG_OPTO_AC5=m
 CONFIG_HAL_GM=m
 CONFIG_HAL_BB_GPIO=m
 CONFIG_HAL_PI_GPIO=m
+CONFIG_ARISC=m
 
 RTAPI_APP_CFLAGS=@RTAPI_APP_CFLAGS@
 CONFIG_USPACE_RTAI=@CONFIG_USPACE_RTAI@
