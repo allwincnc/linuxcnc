@@ -24,8 +24,13 @@ RTAPI_MP_STRING(in, "input pins, comma separated");
 static int8_t *out = "";
 RTAPI_MP_STRING(out, "output pins, comma separated");
 
-static char *ctrl_type = "";
-RTAPI_MP_STRING(ctrl_type, "channels control type, comma separated");
+static char *pwm = "";
+RTAPI_MP_STRING(pwm, "channels control type, comma separated");
+
+#if ENC_MODULE_ENABLED
+static char *encoders = "0";
+RTAPI_MP_STRING(encoders, "number of encoder channels");
+#endif
 
 static const char *gpio_name[GPIO_PORTS_MAX_CNT] =
     {"PA","PB","PC","PD","PE","PF","PG","PL"};
@@ -135,6 +140,79 @@ enum
     PWM_CTRL_BY_FREQ
 };
 
+#if ENC_MODULE_ENABLED
+typedef struct
+{
+    hal_bit_t *enable; // in
+
+    hal_bit_t *cnt_mode; // io
+    hal_bit_t *x4_mode; // io
+    hal_bit_t *index_enable; // io
+    hal_bit_t *reset; // in
+
+    hal_u32_t *a_port; // in
+    hal_u32_t *a_pin; // in
+    hal_bit_t *a_inv; // in
+    hal_bit_t *a_all; // in
+
+    hal_u32_t *b_port; // in
+    hal_u32_t *b_pin; // in
+
+    hal_u32_t *z_port; // in
+    hal_u32_t *z_pin; // in
+    hal_bit_t *z_inv; // in
+    hal_bit_t *z_all; // in
+
+    hal_float_t *pos_scale; // io
+
+    hal_float_t *pos; // out
+    hal_float_t *vel; // out
+    hal_float_t *vel_rpm; // out
+    hal_s32_t *counts; // out
+}
+enc_ch_shmem_t;
+
+typedef struct
+{
+    hal_bit_t enable; // in
+
+    hal_bit_t cnt_mode; // io
+    hal_bit_t x4_mode; // io
+    hal_bit_t index_enable; // io
+    hal_bit_t reset; // in
+
+    hal_u32_t a_port; // in
+    hal_u32_t a_pin; // in
+    hal_bit_t a_inv; // in
+    hal_bit_t a_all; // in
+
+    hal_u32_t b_port; // in
+    hal_u32_t b_pin; // in
+
+    hal_u32_t z_port; // in
+    hal_u32_t z_pin; // in
+    hal_bit_t z_inv; // in
+    hal_bit_t z_all; // in
+
+    hal_float_t pos_scale; // io
+
+    hal_float_t pos; // out
+    hal_float_t vel; // out
+    hal_float_t vel_rpm; // out
+    hal_s32_t counts; // out
+
+    hal_u32_t no_counts_time;
+}
+enc_ch_priv_t;
+
+static enc_ch_shmem_t *ench;
+static enc_ch_priv_t encp[ENC_CH_MAX_CNT] = {0};
+static uint8_t enc_ch_cnt = 0;
+
+#define eh *ench[ch] // `eh` means `Encoder HAL`
+#define ep encp[ch] // `ep` means `Encoder Private`
+#endif
+
 
 
 
@@ -144,6 +222,9 @@ static void gpio_write(void *arg, long period);
 static void gpio_read(void *arg, long period);
 static void pwm_write(void *arg, long period);
 static void pwm_read(void *arg, long period);
+#if ENC_MODULE_ENABLED
+static void enc_read(void *arg, long period);
+#endif
 
 static inline
 int32_t malloc_and_export(const char *comp_name, int32_t comp_id)
@@ -152,7 +233,7 @@ int32_t malloc_and_export(const char *comp_name, int32_t comp_id)
     int8_t n;
     uint8_t port;
     int32_t r, ch;
-    int8_t *data = ctrl_type, *token, type[PWM_CH_MAX_CNT] = {0};
+    int8_t *data = pwm, *token, type[PWM_CH_MAX_CNT] = {0};
     char name[HAL_NAME_LEN + 1];
 
     // init some GPIO vars
@@ -400,6 +481,76 @@ int32_t malloc_and_export(const char *comp_name, int32_t comp_id)
 
         #undef EXPORT_PIN
     }
+
+#if ENC_MODULE_ENABLED
+    // get encoder channels count
+    enc_ch_cnt = (uint8_t) strtoul((const char *)encoders, NULL, 10);
+
+    if ( enc_ch_cnt )
+    {
+        // export encoder HAL functions
+        r = 0;
+        rtapi_snprintf(name, sizeof(name), "%s.encoder.read", comp_name);
+        r += hal_export_funct(name, enc_read, 0, 0, 0, comp_id);
+        if ( r ) {
+            rtapi_print_msg(RTAPI_MSG_ERR, "%s.encoder: HAL functions export failed\n", comp_name);
+            return -1;
+        }
+
+        if ( enc_ch_cnt > ENC_CH_MAX_CNT ) enc_ch_cnt = ENC_CH_MAX_CNT;
+
+        // shared memory allocation for encoder
+        ench = hal_malloc(enc_ch_cnt * sizeof(enc_ch_shmem_t));
+        if ( !ench ) PRINT_ERROR_AND_RETURN("hal_malloc() failed", -1);
+
+        // export encoder HAL pins and set default values
+        #define EXPORT_PIN(IO_TYPE,VAR_TYPE,VAL,NAME,DEFAULT) \
+            r += hal_pin_##VAR_TYPE##_newf(IO_TYPE, &(ench[ch].VAL), comp_id,\
+            "%s.encoder.%d." NAME, comp_name, ch);\
+            eh.VAL = DEFAULT;\
+            ep.VAL = DEFAULT;
+
+        for ( r = 0, ch = enc_ch_cnt; ch--; )
+        {
+            // public HAL data
+            EXPORT_PIN(HAL_IN,bit,enable,"enable", 0);
+
+            EXPORT_PIN(HAL_IO,bit,cnt_mode,"counter-mode", 0);
+            EXPORT_PIN(HAL_IO,bit,x4_mode,"x4-mode", 0);
+            EXPORT_PIN(HAL_IO,bit,index_enable,"index-enable", 0);
+            EXPORT_PIN(HAL_IN,bit,reset,"reset", 0);
+
+            EXPORT_PIN(HAL_IN,u32,a_port,"A-port", UINT32_MAX);
+            EXPORT_PIN(HAL_IN,u32,a_pin,"A-pin", UINT32_MAX);
+            EXPORT_PIN(HAL_IN,bit,a_inv,"A-invert", 0);
+            EXPORT_PIN(HAL_IN,bit,a_inv,"A-all-edges", 0);
+
+            EXPORT_PIN(HAL_IN,u32,b_port,"B-port", UINT32_MAX);
+            EXPORT_PIN(HAL_IN,u32,b_pin,"B-pin", UINT32_MAX);
+
+            EXPORT_PIN(HAL_IN,u32,z_port,"Z-port", UINT32_MAX);
+            EXPORT_PIN(HAL_IN,u32,z_pin,"Z-pin", UINT32_MAX);
+            EXPORT_PIN(HAL_IN,bit,z_inv,"Z-invert", 0);
+            EXPORT_PIN(HAL_IN,bit,z_inv,"Z-all-edges", 0);
+
+            EXPORT_PIN(HAL_IO,float,pos_scale,"pos-scale", 1.0);
+
+            EXPORT_PIN(HAL_OUT,float,pos,"pos", 0.0);
+            EXPORT_PIN(HAL_OUT,float,vel,"vel", 0.0);
+            EXPORT_PIN(HAL_OUT,float,vel_rpm,"vel-rpm", 0.0);
+            EXPORT_PIN(HAL_OUT,s32,counts,"counts", 0);
+
+            ep.no_counts_time = 0;
+        }
+        if ( r )
+        {
+            rtapi_print_msg(RTAPI_MSG_ERR, "%s.encoder: HAL pins export failed\n", comp_name);
+            return -1;
+        }
+
+        #undef EXPORT_PIN
+    }
+#endif
 
     return 0;
 }
@@ -673,6 +824,115 @@ void pwm_write(void *arg, long period)
     }
 }
 
+#if ENC_MODULE_ENABLED
+static inline
+uint32_t enc_a_pins_ok(uint8_t ch)
+{
+    return eh.a_port < GPIO_PORTS_MAX_CNT && eh.a_pin < GPIO_PINS_MAX_CNT;
+}
+
+static inline
+uint32_t enc_b_pins_ok(uint8_t ch)
+{
+    return eh.b_port < GPIO_PORTS_MAX_CNT && eh.b_pin < GPIO_PINS_MAX_CNT;
+}
+
+static inline
+uint32_t enc_z_pins_ok(uint8_t ch)
+{
+    return eh.z_port < GPIO_PORTS_MAX_CNT && eh.z_pin < GPIO_PINS_MAX_CNT;
+}
+
+static inline
+void enc_pins_update(uint8_t ch)
+{
+    uint32_t upd = 0;
+
+    if ( ep.a_port != eh.a_port ) { ep.a_port = eh.a_port; upd++; }
+    if ( ep.a_pin  != eh.a_pin )  { ep.a_pin  = eh.a_pin;  upd++; }
+    if ( ep.a_inv  != eh.a_inv )  { ep.a_inv  = eh.a_inv;  upd++; }
+    if ( ep.a_all  != eh.a_all )  { ep.a_all  = eh.a_all;  upd++; }
+
+    if ( ep.b_port != eh.b_port ) { ep.b_port = eh.b_port; upd++; }
+    if ( ep.b_pin  != eh.b_pin )  { ep.b_pin  = eh.b_pin;  upd++; }
+
+    if ( ep.z_port != eh.z_port ) { ep.z_port = eh.z_port; upd++; }
+    if ( ep.z_pin  != eh.z_pin )  { ep.z_pin  = eh.z_pin;  upd++; }
+    if ( ep.z_inv  != eh.z_inv )  { ep.z_inv  = eh.z_inv;  upd++; }
+    if ( ep.z_all  != eh.z_all )  { ep.z_all  = eh.z_all;  upd++; }
+
+    if ( !upd ) return;
+
+    enc_ch_pins_setup(ch,
+        eh.a_port, eh.a_pin, eh.a_inv, eh.a_all,
+        eh.b_port, eh.b_pin,
+        eh.z_port, eh.z_pin, eh.z_inv, eh.z_all,
+        1);
+}
+
+static
+void enc_read(void *arg, long period)
+{
+    static int32_t counts, ch;
+
+    for ( ch = pwm_ch_cnt; ch--; )
+    {
+        if ( ep.enable != ep.enable ) {
+            ep.enable = ep.enable;
+            enc_ch_state_set(ch, (enc_a_pins_ok(ch) ? eh.enable : 0), 0);
+            if ( !eh.enable ) continue;
+        }
+
+        if ( ep.cnt_mode != eh.cnt_mode ) {
+            ep.cnt_mode = eh.cnt_mode;
+            enc_ch_data_set(ch, ENC_CH_B_USE, (enc_b_pins_ok(ch) ? !eh.cnt_mode : 0), 0);
+        }
+
+        if ( eh.reset ) {
+            eh.counts = 0;
+            enc_ch_pos_set(ch, 0, 0);
+        } else {
+            eh.counts = enc_ch_pos_get(ch, 0);
+            if ( eh.x4_mode ) eh.counts /= 4;
+        }
+
+        if ( eh.pos_scale < 1e-20 && eh.pos_scale > -1e-20 ) eh.pos_scale = 1.0;
+        eh.pos = ((hal_float_t)eh.counts) / eh.pos_scale;
+
+        if ( ep.index_enable != eh.index_enable ) {
+            ep.index_enable = eh.index_enable;
+            enc_ch_data_set(ch, ENC_CH_Z_USE, (enc_z_pins_ok(ch) ? eh.index_enable : 0), 0);
+        } else {
+            eh.index_enable = enc_ch_data_get(ch, ENC_CH_Z_USE, 0);
+        }
+
+        if ( eh.reset ) {
+            eh.vel = 0;
+            eh.vel_rpm = 0;
+            ep.no_counts_time = 0;
+        } else {
+            ep.no_counts_time += period;
+            if ( ep.counts != eh.counts) {
+                eh.vel = (((hal_float_t)eh.counts) - ((hal_float_t)ep.counts))
+                    / eh.pos_scale
+                    * ((hal_float_t)ep.no_counts_time)
+                    / 1000000000;
+                eh.vel_rpm = eh.vel * 60;
+                ep.no_counts_time = 0;
+            } else {
+                if ( ep.no_counts_time > 1000000000 ) {
+                    eh.vel = 0;
+                    eh.vel_rpm = 0;
+                    ep.no_counts_time = 0;
+                }
+            }
+        }
+
+        ep.counts = eh.counts;
+    }
+}
+#endif
+
 
 
 
@@ -691,6 +951,9 @@ int32_t rtapi_app_main(void)
 
     // TODO - gpio cleanup too
     pwm_cleanup(0);
+#if ENC_MODULE_ENABLED
+    enc_cleanup(0);
+#endif
     hal_ready(comp_id);
 
     return 0;
@@ -700,6 +963,9 @@ void rtapi_app_exit(void)
 {
     // TODO - gpio cleanup too
     pwm_cleanup(0);
+#if ENC_MODULE_ENABLED
+    enc_cleanup(0);
+#endif
     shmem_deinit();
     hal_exit(comp_id);
 }

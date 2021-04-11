@@ -1,5 +1,5 @@
-#ifndef _ARISC_API_H
-#define _ARISC_API_H
+#ifndef _API_H
+#define _API_H
 
 #include "rtapi.h"
 #include "rtapi_app.h"
@@ -16,7 +16,6 @@
 
 
 #define ARISC_CPU_FREQ          450000000 // Hz
-#define ARISC_WASTED_TICKS      (160/2) // number of ARISC ticks wasted for calculations
 #define ARISC_FW_BASE           (0x00040000) // for ARM CPU it's 0x00040000
 #define ARISC_FW_SIZE           ((8+8+32)*1024)
 #define ARISC_SHM_SIZE          (4096)
@@ -87,6 +86,7 @@ typedef struct
 
 
 #define PWM_CH_MAX_CNT 16
+#define PWM_WASTED_TICKS (160/2) // number of ARISC ticks wasted for calculations
 
 enum
 {
@@ -131,6 +131,54 @@ enum
 
 
 
+#define ENC_MODULE_ENABLED 1
+
+#if ENC_MODULE_ENABLED
+#define ENC_CH_MAX_CNT 8
+
+enum
+{
+    ENC_CH_BUSY,
+    ENC_CH_POS,
+    ENC_CH_AB_STATE,
+
+    ENC_CH_A_PORT,
+    ENC_CH_A_PIN_MSK,
+    ENC_CH_A_INV,
+    ENC_CH_A_ALL,
+    ENC_CH_A_STATE,
+
+    ENC_CH_B_USE,
+    ENC_CH_B_PORT,
+    ENC_CH_B_PIN_MSK,
+    ENC_CH_B_STATE,
+
+    ENC_CH_Z_USE,
+    ENC_CH_Z_PORT,
+    ENC_CH_Z_PIN_MSK,
+    ENC_CH_Z_INV,
+    ENC_CH_Z_ALL,
+    ENC_CH_Z_STATE,
+
+    ENC_CH_DATA_CNT
+};
+
+enum
+{
+    ENC_ARM_LOCK,
+    ENC_ARISC_LOCK,
+    ENC_CH_CNT,
+    ENC_DATA_CNT
+};
+
+#define ENC_SHM_BASE         (PWM_SHM_BASE + PWM_SHM_SIZE)
+#define ENC_SHM_DATA_BASE    (ENC_SHM_BASE)
+#define ENC_SHM_CH_DATA_BASE (ENC_SHM_DATA_BASE + ENC_DATA_CNT*4)
+#define ENC_SHM_SIZE         (ENC_SHM_CH_DATA_BASE + ENC_CH_MAX_CNT*ENC_CH_DATA_CNT*4 - ENC_SHM_BASE)
+#endif
+
+
+
 #define PRINT_ERROR(MSG) \
     rtapi_print_msg(RTAPI_MSG_ERR, "%s: "MSG"\n", comp_name)
 
@@ -147,31 +195,42 @@ static uint32_t _gpio_buf[GPIO_PORTS_MAX_CNT] = {0};
 
 volatile uint32_t * _pwmc[PWM_CH_MAX_CNT][PWM_CH_DATA_CNT] = {0};
 volatile uint32_t * _pwmd[PWM_DATA_CNT] = {0};
-
+#if ENC_MODULE_ENABLED
+volatile uint32_t * _encc[ENC_CH_MAX_CNT][ENC_CH_DATA_CNT] = {0};
+volatile uint32_t * _encd[ENC_DATA_CNT] = {0};
+#endif
 
 
 
 static inline
-void _spin_lock()
+void _pwm_spin_lock()
 {
     *_pwmd[PWM_ARM_LOCK] = 1;
+    if ( ! *_pwmd[PWM_CH_CNT] ) return;
     while ( *_pwmd[PWM_ARISC_LOCK] );
 }
 
 static inline
-void _spin_unlock()
+void _pwm_spin_unlock()
 {
     *_pwmd[PWM_ARM_LOCK] = 0;
 }
 
+#if ENC_MODULE_ENABLED
 static inline
-int32_t spin_lock_test(uint32_t usec)
+void _enc_spin_lock()
 {
-    _spin_lock();
-    usleep(usec);
-    _spin_unlock();
-    return 0;
+    *_encd[ENC_ARM_LOCK] = 1;
+    if ( ! *_encd[ENC_CH_CNT] ) return;
+    while ( *_encd[ENC_ARISC_LOCK] );
 }
+
+static inline
+void _enc_spin_unlock()
+{
+    *_encd[ENC_ARM_LOCK] = 0;
+}
+#endif
 
 static inline
 int32_t gpio_pin_pull_set(uint32_t port, uint32_t pin, uint32_t level, uint32_t safe)
@@ -183,10 +242,16 @@ int32_t gpio_pin_pull_set(uint32_t port, uint32_t pin, uint32_t level, uint32_t 
         if ( level >= GPIO_PULL_CNT ) return -3;
     }
     uint32_t slot = pin/16, pos = pin%16*2;
-    _spin_lock();
+    _pwm_spin_lock();
+#if ENC_MODULE_ENABLED
+    _enc_spin_lock();
+#endif
     _GPIO[port]->pull[slot] &= ~(0b11 << pos);
     _GPIO[port]->pull[slot] |= (level << pos);
-    _spin_unlock();
+#if ENC_MODULE_ENABLED
+    _enc_spin_unlock();
+#endif
+    _pwm_spin_unlock();
     return 0;
 }
 
@@ -212,10 +277,16 @@ int32_t gpio_pin_multi_drive_set(uint32_t port, uint32_t pin, uint32_t level, ui
         if ( level >= GPIO_MULTI_DRIVE_LEVEL_CNT ) return -3;
     }
     uint32_t slot = pin/16, pos = pin%16*2;
-    _spin_lock();
+    _pwm_spin_lock();
+#if ENC_MODULE_ENABLED
+    _enc_spin_lock();
+#endif
     _GPIO[port]->drive[slot] &= ~(0b11 << pos);
     _GPIO[port]->drive[slot] |= (level << pos);
-    _spin_unlock();
+#if ENC_MODULE_ENABLED
+    _enc_spin_unlock();
+#endif
+    _pwm_spin_unlock();
     return 0;
 }
 
@@ -241,10 +312,16 @@ int32_t gpio_pin_func_set(uint32_t port, uint32_t pin, uint32_t func, uint32_t s
         if ( func >= GPIO_FUNC_CNT ) return -3;
     }
     uint32_t slot = pin/8, pos = pin%8*4;
-    _spin_lock();
+    _pwm_spin_lock();
+#if ENC_MODULE_ENABLED
+    _enc_spin_lock();
+#endif
     _GPIO[port]->config[slot] &= ~(0b0111 << pos);
     _GPIO[port]->config[slot] |=    (func << pos);
-    _spin_unlock();
+#if ENC_MODULE_ENABLED
+    _enc_spin_unlock();
+#endif
+    _pwm_spin_unlock();
     return 0;
 }
 
@@ -279,9 +356,15 @@ int32_t gpio_pin_set(uint32_t port, uint32_t pin, uint32_t safe)
         if ( port >= GPIO_PORTS_MAX_CNT ) return 0;
         if ( pin >= GPIO_PINS_MAX_CNT ) return 0;
     }
-    _spin_lock();
+    _pwm_spin_lock();
+#if ENC_MODULE_ENABLED
+    _enc_spin_lock();
+#endif
     _GPIO[port]->data |= (1UL << pin);
-    _spin_unlock();
+#if ENC_MODULE_ENABLED
+    _enc_spin_unlock();
+#endif
+    _pwm_spin_unlock();
     return 0;
 }
 
@@ -293,9 +376,15 @@ int32_t gpio_pin_clr(uint32_t port, uint32_t pin, uint32_t safe)
         if ( port >= GPIO_PORTS_MAX_CNT ) return 0;
         if ( pin >= GPIO_PINS_MAX_CNT ) return 0;
     }
-    _spin_lock();
+    _pwm_spin_lock();
+#if ENC_MODULE_ENABLED
+    _enc_spin_lock();
+#endif
     _GPIO[port]->data &= ~(1UL << pin);
-    _spin_unlock();
+#if ENC_MODULE_ENABLED
+    _enc_spin_unlock();
+#endif
+    _pwm_spin_unlock();
     return 0;
 }
 
@@ -316,9 +405,15 @@ int32_t gpio_port_set(uint32_t port, uint32_t mask, uint32_t safe)
     {
         if ( port >= GPIO_PORTS_MAX_CNT ) return 0;
     }
-    _spin_lock();
+    _pwm_spin_lock();
+#if ENC_MODULE_ENABLED
+    _enc_spin_lock();
+#endif
     _GPIO[port]->data |= mask;
-    _spin_unlock();
+#if ENC_MODULE_ENABLED
+    _enc_spin_unlock();
+#endif
+    _pwm_spin_unlock();
     return 0;
 }
 
@@ -329,9 +424,15 @@ int32_t gpio_port_clr(uint32_t port, uint32_t mask, uint32_t safe)
     {
         if ( port >= GPIO_PORTS_MAX_CNT ) return 0;
     }
-    _spin_lock();
+    _pwm_spin_lock();
+#if ENC_MODULE_ENABLED
+    _enc_spin_lock();
+#endif
     _GPIO[port]->data &= ~mask;
-    _spin_unlock();
+#if ENC_MODULE_ENABLED
+    _enc_spin_unlock();
+#endif
+    _pwm_spin_unlock();
     return 0;
 }
 
@@ -348,12 +449,18 @@ static inline
 int32_t gpio_all_set(uint32_t* mask, uint32_t safe)
 {
     uint32_t port;
-    _spin_lock();
+    _pwm_spin_lock();
+#if ENC_MODULE_ENABLED
+    _enc_spin_lock();
+#endif
     for ( port = GPIO_PORTS_MAX_CNT; port--; )
     {
         _GPIO[port]->data |= mask[port];
     }
-    _spin_unlock();
+#if ENC_MODULE_ENABLED
+    _enc_spin_unlock();
+#endif
+    _pwm_spin_unlock();
     return 0;
 }
 
@@ -361,12 +468,18 @@ static inline
 int32_t gpio_all_clr(uint32_t* mask, uint32_t safe)
 {
     uint32_t port;
-    _spin_lock();
+    _pwm_spin_lock();
+#if ENC_MODULE_ENABLED
+    _enc_spin_lock();
+#endif
     for ( port = GPIO_PORTS_MAX_CNT; port--; )
     {
         _GPIO[port]->data &= ~mask[port];
     }
-    _spin_unlock();
+#if ENC_MODULE_ENABLED
+    _enc_spin_unlock();
+#endif
+    _pwm_spin_unlock();
     return 0;
 }
 
@@ -382,12 +495,10 @@ int32_t pwm_cleanup(uint32_t safe)
     {
     }
 
-//    _spin_lock();
     for ( d = PWM_DATA_CNT; d--; ) *_pwmd[d] = 0;
     for ( c = PWM_CH_MAX_CNT; c--; ) {
         for ( d = PWM_CH_DATA_CNT; d--; ) *_pwmc[c][d] = 0;
     }
-//    _spin_unlock();
 
     return 0;
 }
@@ -400,9 +511,9 @@ int32_t pwm_data_set(uint32_t name, uint32_t value, uint32_t safe)
         if ( name >= PWM_DATA_CNT ) return -1;
         if ( name == PWM_CH_CNT && value >= PWM_CH_MAX_CNT ) return -2;
     }
-    _spin_lock();
+    _pwm_spin_lock();
     *_pwmd[name] = value;
-    _spin_unlock();
+    _pwm_spin_unlock();
     return 0;
 }
 
@@ -413,9 +524,9 @@ uint32_t pwm_data_get(uint32_t name, uint32_t safe)
     {
         if ( name >= PWM_DATA_CNT ) return 0;
     }
-    _spin_lock();
+    _pwm_spin_lock();
     uint32_t value = *_pwmd[name];
-    _spin_unlock();
+    _pwm_spin_unlock();
     return value;
 }
 
@@ -427,9 +538,9 @@ int32_t pwm_ch_data_set(uint32_t c, uint32_t name, uint32_t value, uint32_t safe
         if ( c >= PWM_CH_MAX_CNT ) return -1;
         if ( name >= PWM_CH_DATA_CNT ) return -2;
     }
-    _spin_lock();
+    _pwm_spin_lock();
     *_pwmc[c][name] = (name == PWM_CH_POS) ? (int32_t)value : value;
-    _spin_unlock();
+    _pwm_spin_unlock();
     return 0;
 }
 
@@ -441,9 +552,9 @@ uint32_t pwm_ch_data_get(uint32_t c, uint32_t name, uint32_t safe)
         if ( c >= PWM_CH_MAX_CNT ) return 0;
         if ( name >= PWM_CH_DATA_CNT ) return 0;
     }
-    _spin_lock();
+    _pwm_spin_lock();
     uint32_t value = *_pwmc[c][name];
-    _spin_unlock();
+    _pwm_spin_unlock();
     return value;
 }
 
@@ -473,14 +584,14 @@ int32_t pwm_ch_pins_setup (
     if ( d_inv ) gpio_pin_set(d_port, d_pin, safe);
     else         gpio_pin_clr(d_port, d_pin, safe);
 
-    _spin_lock();
+    _pwm_spin_lock();
     *_pwmc[c][PWM_CH_P_PORT] = p_port;
     *_pwmc[c][PWM_CH_P_PIN_MSK] = 1UL << p_pin;
     *_pwmc[c][PWM_CH_P_PIN_MSKN] = ~(1UL << p_pin);
     *_pwmc[c][PWM_CH_D_PORT] = d_port;
     *_pwmc[c][PWM_CH_D_PIN_MSK] = 1UL << d_pin;
     *_pwmc[c][PWM_CH_D_PIN_MSKN] = ~(1UL << d_pin);
-    _spin_unlock();
+    _pwm_spin_unlock();
 
     return 0;
 }
@@ -512,10 +623,10 @@ int32_t pwm_ch_times_setup (
             if ( ch >= PWM_CH_MAX_CNT ) ch = 0;
             ch_cnt = ch + 1;
         }
-        _spin_lock();
+        _pwm_spin_lock();
         *_pwmc[c][PWM_CH_P_STOP] = 1;
         *_pwmd[PWM_CH_CNT] = ch_cnt;
-        _spin_unlock();
+        _pwm_spin_unlock();
         return 0;
     }
 
@@ -532,16 +643,16 @@ int32_t pwm_ch_times_setup (
     p_freq_mHz = p_freq_mHz < 0 ? -p_freq_mHz : p_freq_mHz;
 
     p_period = (uint32_t) ( ((uint64_t)ARISC_CPU_FREQ) * ((uint64_t)1000) / ((uint64_t)p_freq_mHz) );
-    p_period = p_period < (2*ARISC_WASTED_TICKS) ? 0 : p_period - (2*ARISC_WASTED_TICKS);
+    p_period = p_period < (2*PWM_WASTED_TICKS) ? 0 : p_period - (2*PWM_WASTED_TICKS);
     p_t1 = (uint32_t) ( ((uint64_t)p_period) * ((uint64_t)p_duty_s32) / ((uint64_t)INT32_MAX) );
     p_t0 = p_period - p_t1;
 
     d_t0 = ARISC_CPU_FREQ / (1000000000 / d_hold_ns);
-    d_t0 = d_t0 < ARISC_WASTED_TICKS ? 0 : d_t0 - ARISC_WASTED_TICKS;
+    d_t0 = d_t0 < PWM_WASTED_TICKS ? 0 : d_t0 - PWM_WASTED_TICKS;
     d_t1 = ARISC_CPU_FREQ / (1000000000 / d_setup_ns);
-    d_t1 = d_t1 < ARISC_WASTED_TICKS ? 0 : d_t1 - ARISC_WASTED_TICKS;
+    d_t1 = d_t1 < PWM_WASTED_TICKS ? 0 : d_t1 - PWM_WASTED_TICKS;
 
-    _spin_lock();
+    _pwm_spin_lock();
     *_pwmc[c][PWM_CH_P_BUSY] = 1;
     *_pwmc[c][PWM_CH_P_T0] = p_t0;
     *_pwmc[c][PWM_CH_P_T1] = p_t1;
@@ -549,7 +660,7 @@ int32_t pwm_ch_times_setup (
     *_pwmc[c][PWM_CH_D_T1] = d_t1;
     *_pwmc[c][PWM_CH_D_CHANGE] = d_change;
     *_pwmd[PWM_CH_CNT] = ch_cnt;
-    _spin_unlock();
+    _pwm_spin_unlock();
 
     return 0;
 }
@@ -561,9 +672,9 @@ int32_t pwm_ch_pos_get(uint32_t c, uint32_t safe)
     {
         if ( c >= PWM_CH_MAX_CNT ) return 0;
     }
-    _spin_lock();
+    _pwm_spin_lock();
     int32_t value = (int32_t) *_pwmc[c][PWM_CH_POS];
-    _spin_unlock();
+    _pwm_spin_unlock();
     return value;
 }
 
@@ -574,12 +685,191 @@ int32_t pwm_ch_pos_set(uint32_t c, int32_t pos, uint32_t safe)
     {
         if ( c >= PWM_CH_MAX_CNT ) return -1;
     }
-    _spin_lock();
+    _pwm_spin_lock();
     *_pwmc[c][PWM_CH_POS] = (uint32_t) pos;
-    _spin_unlock();
+    _pwm_spin_unlock();
     return 0;
 }
 
+
+
+#if ENC_MODULE_ENABLED
+static inline
+int32_t enc_cleanup(uint32_t safe)
+{
+    uint32_t c, d;
+
+    if ( safe )
+    {
+    }
+
+    for ( d = ENC_DATA_CNT; d--; ) *_encd[d] = 0;
+    for ( c = ENC_CH_MAX_CNT; c--; ) {
+        for ( d = ENC_CH_DATA_CNT; d--; ) *_encc[c][d] = 0;
+    }
+
+    return 0;
+}
+
+static inline
+int32_t enc_data_set(uint32_t name, uint32_t value, uint32_t safe)
+{
+    if ( safe )
+    {
+        if ( name >= ENC_DATA_CNT ) return -1;
+        if ( name == ENC_CH_CNT && value >= ENC_CH_MAX_CNT ) return -2;
+    }
+    _enc_spin_lock();
+    *_encd[name] = value;
+    _enc_spin_unlock();
+    return 0;
+}
+
+static inline
+uint32_t enc_data_get(uint32_t name, uint32_t safe)
+{
+    if ( safe )
+    {
+        if ( name >= ENC_DATA_CNT ) return 0;
+    }
+    _enc_spin_lock();
+    uint32_t value = *_encd[name];
+    _enc_spin_unlock();
+    return value;
+}
+
+static inline
+int32_t enc_ch_data_set(uint32_t c, uint32_t name, uint32_t value, uint32_t safe)
+{
+    if ( safe )
+    {
+        if ( c >= ENC_CH_MAX_CNT ) return -1;
+        if ( name >= ENC_CH_DATA_CNT ) return -2;
+    }
+    _enc_spin_lock();
+    *_encc[c][name] = (name == ENC_CH_POS) ? (int32_t)value : value;
+    _enc_spin_unlock();
+    return 0;
+}
+
+static inline
+uint32_t enc_ch_data_get(uint32_t c, uint32_t name, uint32_t safe)
+{
+    if ( safe )
+    {
+        if ( c >= ENC_CH_MAX_CNT ) return 0;
+        if ( name >= ENC_CH_DATA_CNT ) return 0;
+    }
+    _enc_spin_lock();
+    uint32_t value = *_encc[c][name];
+    _enc_spin_unlock();
+    return value;
+}
+
+static inline
+int32_t enc_ch_pins_setup(
+    uint32_t c,
+    uint32_t a_port, uint32_t a_pin, uint32_t a_inv, uint32_t a_all,
+    uint32_t b_port, uint32_t b_pin,
+    uint32_t z_port, uint32_t z_pin, uint32_t z_inv, uint32_t z_all,
+    uint32_t safe
+) {
+    if ( safe )
+    {
+        if ( c >= ENC_CH_MAX_CNT ) return -1;
+        if ( a_port >= GPIO_PORTS_MAX_CNT ) return -1;
+        if ( a_pin >= GPIO_PINS_MAX_CNT ) return -1;
+        if ( b_port >= GPIO_PORTS_MAX_CNT ) return -1;
+        if ( b_pin >= GPIO_PINS_MAX_CNT ) return -1;
+        if ( z_port >= GPIO_PORTS_MAX_CNT ) return -1;
+        if ( z_pin >= GPIO_PINS_MAX_CNT ) return -1;
+    }
+
+    gpio_pin_func_set(a_port, a_pin, GPIO_FUNC_IN, safe);
+    gpio_pin_pull_set(a_port, a_pin, GPIO_PULL_DISABLE, safe);
+    gpio_pin_func_set(b_port, b_pin, GPIO_FUNC_IN, safe);
+    gpio_pin_pull_set(b_port, b_pin, GPIO_PULL_DISABLE, safe);
+    gpio_pin_func_set(z_port, z_pin, GPIO_FUNC_IN, safe);
+    gpio_pin_pull_set(z_port, z_pin, GPIO_PULL_DISABLE, safe);
+
+    _enc_spin_lock();
+    *_encc[c][ENC_CH_A_PORT] = a_port;
+    *_encc[c][ENC_CH_A_PIN_MSK] = 1UL << a_pin;
+    *_encc[c][ENC_CH_A_INV] = a_inv;
+    *_encc[c][ENC_CH_A_ALL] = a_all;
+    *_encc[c][ENC_CH_B_PORT] = b_port;
+    *_encc[c][ENC_CH_B_PIN_MSK] = 1UL << b_pin;
+    *_encc[c][ENC_CH_Z_PORT] = z_port;
+    *_encc[c][ENC_CH_Z_PIN_MSK] = 1UL << z_pin;
+    *_encc[c][ENC_CH_Z_INV] = z_inv;
+    *_encc[c][ENC_CH_Z_ALL] = z_all;
+    _enc_spin_unlock();
+
+    return 0;
+}
+
+static inline
+int32_t enc_ch_state_set(uint32_t c, uint32_t enable, uint32_t safe )
+{
+    uint32_t ch_cnt, ch;
+
+    if ( safe )
+    {
+        if ( c >= ENC_CH_MAX_CNT ) return -1;
+    }
+
+    ch_cnt = *_encd[ENC_CH_CNT];
+
+    if ( !enable )
+    {
+        if ( !(*_encc[c][ENC_CH_BUSY]) ) return 0;
+        if ( (c+1) == ch_cnt )
+        {
+            for ( ch = c; ch < ENC_CH_MAX_CNT && *_encc[ch][ENC_CH_BUSY]; ch-- );
+            if ( ch >= PWM_CH_MAX_CNT ) ch = 0;
+            ch_cnt = ch + 1;
+        }
+    }
+    else
+    {
+        if ( *_encc[c][ENC_CH_BUSY] ) return 0;
+        if ( c >= ch_cnt ) ch_cnt = c + 1;
+    }
+
+    _enc_spin_lock();
+    *_encc[c][ENC_CH_BUSY] = enable;
+    *_encd[ENC_CH_CNT] = ch_cnt;
+    _enc_spin_unlock();
+
+    return 0;
+}
+
+static inline
+int32_t enc_ch_pos_get(uint32_t c, uint32_t safe)
+{
+    if ( safe )
+    {
+        if ( c >= ENC_CH_MAX_CNT ) return 0;
+    }
+    _enc_spin_lock();
+    int32_t value = (int32_t) *_encc[c][ENC_CH_POS];
+    _enc_spin_unlock();
+    return value;
+}
+
+static inline
+int32_t enc_ch_pos_set(uint32_t c, int32_t pos, uint32_t safe)
+{
+    if ( safe )
+    {
+        if ( c >= ENC_CH_MAX_CNT ) return -1;
+    }
+    _enc_spin_lock();
+    *_encc[c][ENC_CH_POS] = (uint32_t) pos;
+    _enc_spin_unlock();
+    return 0;
+}
+#endif
 
 
 
@@ -597,15 +887,21 @@ int32_t shmem_init(const char *comp_name)
     setfsuid( getuid() );
 
     // mmap shmem
-    addr = PWM_SHM_BASE & ~(4096 - 1);
-    off = PWM_SHM_BASE & (4096 - 1);
-    _shm_vrt_addr = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, mem_fd, addr);
+    addr = ARISC_SHM_BASE & ~(ARISC_SHM_SIZE - 1);
+    off = ARISC_SHM_BASE & (ARISC_SHM_SIZE - 1);
+    _shm_vrt_addr = mmap(NULL, ARISC_SHM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, mem_fd, addr);
     if (_shm_vrt_addr == MAP_FAILED) PRINT_ERROR_AND_RETURN("ERROR: shm mmap() failed\n",-1);
     p = _shm_vrt_addr + off/4;
     for ( name = 0; name < PWM_DATA_CNT; name++, p++ ) _pwmd[name] = p;
     for ( ch = 0; ch < PWM_CH_MAX_CNT; ch++ ) {
         for ( name = 0; name < PWM_CH_DATA_CNT; name++, p++ ) _pwmc[ch][name] = p;
     }
+#if ENC_MODULE_ENABLED
+    for ( name = 0; name < ENC_DATA_CNT; name++, p++ ) _encd[name] = p;
+    for ( ch = 0; ch < ENC_CH_MAX_CNT; ch++ ) {
+        for ( name = 0; name < ENC_CH_DATA_CNT; name++, p++ ) _encc[ch][name] = p;
+    }
+#endif
 
     // mmap gpio
     addr = GPIO_BASE & ~(4096 - 1);
@@ -633,7 +929,7 @@ int32_t shmem_init(const char *comp_name)
 static inline
 void shmem_deinit(void)
 {
-    munmap(_shm_vrt_addr, 4096);
+    munmap(_shm_vrt_addr, ARISC_SHM_SIZE);
     munmap(_gpio_vrt_addr, 4096);
     munmap(_r_gpio_vrt_addr, 4096);
 }
