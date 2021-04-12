@@ -248,8 +248,8 @@ int32_t malloc_and_export(const char *comp_name, int32_t comp_id)
         gpio_hal_drive[port] = hal_malloc(GPIO_PINS_MAX_CNT * sizeof(hal_u32_t *));
 
         if ( !gpio_hal_0[port] || !gpio_hal_1[port] ||
-             !gpio_hal_pull[port] || !gpio_hal_drive[port] )
-        {
+             !gpio_hal_pull[port] || !gpio_hal_drive[port]
+        ) {
             rtapi_print_msg(RTAPI_MSG_ERR,
                 "%s.gpio: port %s hal_malloc() failed \n",
                 comp_name, gpio_name[port]);
@@ -273,10 +273,8 @@ int32_t malloc_and_export(const char *comp_name, int32_t comp_id)
             if ( strlen(token) < 3 ) continue;
 
             // trying to find a correct port name
-            for ( found = 0, port = GPIO_PORTS_MAX_CNT; port--; )
-            {
-                if ( 0 == memcmp(token, gpio_name[port], 2) )
-                {
+            for ( found = 0, port = GPIO_PORTS_MAX_CNT; port--; ) {
+                if ( 0 == memcmp(token, gpio_name[port], 2) ) {
                     found = 1;
                     break;
                 }
@@ -309,22 +307,18 @@ int32_t malloc_and_export(const char *comp_name, int32_t comp_id)
                 &gpio_hal_drive[port][pin], comp_id,
                 "%s.gpio.%s-multi-drive-level", comp_name, token);
 
-            if (retval < 0)
-            {
+            if (retval < 0) {
                 rtapi_print_msg(RTAPI_MSG_ERR, "%s.gpio: pin %s export failed \n",
                     comp_name, token);
                 return -1;
             }
 
             // configure GPIO pin
-            if ( n )
-            {
+            if ( n ) {
                 gpio_out_cnt++;
                 gpio_out_mask[port] |= pin_msk[pin];
                 gpio_pin_func_set(port, pin, GPIO_FUNC_OUT, 0);
-            }
-            else
-            {
+            } else {
                 gpio_in_cnt++;
                 gpio_in_mask[port] |= pin_msk[pin];
                 gpio_pin_func_set(port, pin, GPIO_FUNC_IN, 0);
@@ -340,8 +334,7 @@ int32_t malloc_and_export(const char *comp_name, int32_t comp_id)
             gpio_hal_1_prev[port][pin] = *gpio_hal_1[port][pin];
 
             // get pin pull up/down state
-            switch ( gpio_pin_pull_get(port, pin, 0) )
-            {
+            switch ( gpio_pin_pull_get(port, pin, 0) ) {
                 case GPIO_PULL_UP:      *gpio_hal_pull[port][pin] = 1;
                 case GPIO_PULL_DOWN:    *gpio_hal_pull[port][pin] = -1;
                 default:                *gpio_hal_pull[port][pin] = 0;
@@ -373,8 +366,7 @@ int32_t malloc_and_export(const char *comp_name, int32_t comp_id)
     }
 
     // get PWM channels count and type
-    while ( (token = strtok(data, ",")) != NULL )
-    {
+    while ( (token = strtok(data, ",")) != NULL ) {
         if ( data != NULL ) data = NULL;
 
         if      ( token[0] == 'P' || token[0] == 'p' ) type[pwm_ch_cnt++] = PWM_CTRL_BY_POS;
@@ -473,8 +465,7 @@ int32_t malloc_and_export(const char *comp_name, int32_t comp_id)
             pp.freq_mHz = 0;
             pp.dc_s32 = 0;
         }
-        if ( r )
-        {
+        if ( r ) {
             rtapi_print_msg(RTAPI_MSG_ERR, "%s.pwm: HAL pins export failed\n", comp_name);
             return -1;
         }
@@ -542,8 +533,7 @@ int32_t malloc_and_export(const char *comp_name, int32_t comp_id)
 
             ep.no_counts_time = 0;
         }
-        if ( r )
-        {
+        if ( r ) {
             rtapi_print_msg(RTAPI_MSG_ERR, "%s.encoder: HAL pins export failed\n", comp_name);
             return -1;
         }
@@ -573,17 +563,13 @@ void gpio_read(void *arg, long period)
 
         port_state = gpio_port_get(port, 0);
 
-        for ( pin = gpio_pins_cnt[port]; pin--; )
-        {
+        for ( pin = gpio_pins_cnt[port]; pin--; ) {
             if ( !(gpio_in_mask[port] & pin_msk[pin]) ) continue;
 
-            if ( port_state & pin_msk[pin] )
-            {
+            if ( port_state & pin_msk[pin] ) {
                 *gpio_hal_0[port][pin] = 1;
                 *gpio_hal_1[port][pin] = 0;
-            }
-            else
-            {
+            } else {
                 *gpio_hal_0[port][pin] = 0;
                 *gpio_hal_1[port][pin] = 1;
             }
@@ -613,13 +599,11 @@ void gpio_write(void *arg, long period)
             // set pin pull up/down state
             if ( gpio_hal_pull_prev[port][pin] != *gpio_hal_pull[port][pin] )
             {
-                if ( *gpio_hal_pull[port][pin] > 0 )
-                {
+                if ( *gpio_hal_pull[port][pin] > 0 ) {
                     *gpio_hal_pull[port][pin] = 1;
                     gpio_pin_pull_set(port, pin, GPIO_PULL_UP, 0);
                 }
-                else if ( *gpio_hal_pull[port][pin] < 0 )
-                {
+                else if ( *gpio_hal_pull[port][pin] < 0 ) {
                     *gpio_hal_pull[port][pin] = -1;
                     gpio_pin_pull_set(port, pin, GPIO_PULL_DOWN, 0);
                 }
@@ -628,8 +612,7 @@ void gpio_write(void *arg, long period)
             }
 
             // set pin multi-drive (open drain) state
-            if ( gpio_hal_drive_prev[port][pin] != *gpio_hal_drive[port][pin] )
-            {
+            if ( gpio_hal_drive_prev[port][pin] != *gpio_hal_drive[port][pin] ) {
                 *gpio_hal_drive[port][pin] &= (GPIO_PULL_CNT - 1);
                 gpio_pin_multi_drive_set(port, pin, *gpio_hal_drive[port][pin], 0);
                 gpio_hal_drive_prev[port][pin] = *gpio_hal_drive[port][pin];
@@ -637,15 +620,11 @@ void gpio_write(void *arg, long period)
 
             if ( !(gpio_out_mask[port] & pin_msk[pin]) ) continue;
 
-            if ( *gpio_hal_0[port][pin] != gpio_hal_0_prev[port][pin] )
-            {
-                if ( *gpio_hal_0[port][pin] )
-                {
+            if ( *gpio_hal_0[port][pin] != gpio_hal_0_prev[port][pin] ) {
+                if ( *gpio_hal_0[port][pin] ) {
                     *gpio_hal_1[port][pin] = 0;
                     mask_1 |= pin_msk[pin];
-                }
-                else
-                {
+                } else {
                     *gpio_hal_1[port][pin] = 1;
                     mask_0 |= pin_msk[pin];
                 }
@@ -653,15 +632,11 @@ void gpio_write(void *arg, long period)
                 gpio_hal_1_prev[port][pin] = *gpio_hal_1[port][pin];
             }
 
-            if ( *gpio_hal_1[port][pin] != gpio_hal_1_prev[port][pin] )
-            {
-                if ( *gpio_hal_1[port][pin] )
-                {
+            if ( *gpio_hal_1[port][pin] != gpio_hal_1_prev[port][pin] ) {
+                if ( *gpio_hal_1[port][pin] ) {
                     *gpio_hal_0[port][pin] = 0;
                     mask_0 |= pin_msk[pin];
-                }
-                else
-                {
+                } else {
                     *gpio_hal_0[port][pin] = 1;
                     mask_1 |= pin_msk[pin];
                 }
@@ -714,7 +689,7 @@ int32_t pwm_get_new_freq(uint8_t ch, long period)
             if ( ph.pos_fb == ph.pos_cmd && pp.pos_scale == ph.pos_scale ) break;
             pp.pos_scale = ph.pos_scale;
             freq = (int32_t) round( ph.pos_scale * (ph.pos_cmd - pp.pos_fb) *
-                                    ((hal_float_t)period) / 1000000 );
+                                    ((hal_float_t)period) );
             break;
         }
         case PWM_CTRL_BY_VEL: {
@@ -726,12 +701,12 @@ int32_t pwm_get_new_freq(uint8_t ch, long period)
             pp.vel_scale = ph.vel_scale;
             if ( ph.vel_cmd < 1e-20 && ph.vel_cmd > -1e-20 ) {
                 ph.vel_fb = 0;
-                return 0;
+                break;
             }
             if ( ph.vel_scale < 1e-20 && ph.vel_scale > -1e-20 ) ph.vel_scale = 1.0;
             freq = (int32_t) round(ph.vel_scale * ph.vel_cmd * 1000);
             ph.vel_fb = ((hal_float_t) freq) / ph.vel_scale / 1000;
-            return freq;
+            break;
         }
         case PWM_CTRL_BY_FREQ: {
             if ( pp.freq_cmd == ph.freq_cmd ) {
@@ -751,8 +726,8 @@ int32_t pwm_get_new_freq(uint8_t ch, long period)
 static inline
 uint32_t pwm_pins_ok(uint8_t ch)
 {
-    if ( ph.pwm_port > GPIO_PORTS_MAX_CNT || ph.pwm_pin > GPIO_PINS_MAX_CNT ||
-         ph.dir_port > GPIO_PORTS_MAX_CNT || ph.dir_pin > GPIO_PINS_MAX_CNT ) return 0;
+    if ( ph.pwm_port >= GPIO_PORTS_MAX_CNT || ph.pwm_pin >= GPIO_PINS_MAX_CNT ||
+         ph.dir_port >= GPIO_PORTS_MAX_CNT || ph.dir_pin >= GPIO_PINS_MAX_CNT ) return 0;
 
     return 1;
 }
@@ -787,7 +762,10 @@ void pwm_read(void *arg, long period)
 
         ph.counts = pwm_ch_pos_get(ch, 0);
 
-        if ( ph.pos_scale < 1e-20 && ph.pos_scale > -1e-20 ) ph.pos_scale = 1.0;
+        if ( ph.pos_scale < 1e-20 && ph.pos_scale > -1e-20 ) {
+            pp.pos_scale = 1.0;
+            ph.pos_scale = 1.0;
+        }
         ph.pos_fb = ((hal_float_t)ph.counts) / ph.pos_scale;
         pp.pos_fb = ph.pos_fb;
         counts = (hal_s32_t) round(ph.pos_scale * ph.pos_cmd);
@@ -804,12 +782,13 @@ void pwm_write(void *arg, long period)
     {
         if ( pp.enable != ph.enable ) {
             pp.enable = ph.enable;
-            if ( !ph.enable ) { pwm_ch_times_setup(ch,0,0,0,0,0); continue; };
-        } else if ( !ph.enable ) continue;
+            pwm_ch_state_set(ch, (pwm_pins_ok(ch) ? ph.enable : 0), 0);
+            if ( !ph.enable ) continue;
+        }
 
         pwm_pins_update(ch);
 
-        if ( !pwm_pins_ok(ch) ) { pwm_ch_times_setup(ch,0,0,0,0,0); continue; };
+        if ( !pwm_pins_ok(ch) ) { pwm_ch_state_set(ch, 0, 0); continue; };
 
         dc = pwm_get_new_dc(ch);
         freq = pwm_get_new_freq(ch, period);
@@ -877,8 +856,8 @@ void enc_read(void *arg, long period)
 
     for ( ch = pwm_ch_cnt; ch--; )
     {
-        if ( ep.enable != ep.enable ) {
-            ep.enable = ep.enable;
+        if ( ep.enable != eh.enable ) {
+            ep.enable = eh.enable;
             enc_ch_state_set(ch, (enc_a_pins_ok(ch) ? eh.enable : 0), 0);
             if ( !eh.enable ) continue;
         }
@@ -940,19 +919,19 @@ void enc_read(void *arg, long period)
 
 int32_t rtapi_app_main(void)
 {
-    if ( (comp_id = hal_init(comp_name)) < 0 )
+    if ( (comp_id = hal_init(comp_name)) < 0 ) {
         PRINT_ERROR_AND_RETURN("ERROR: hal_init() failed\n",-1);
+    }
 
-    if ( shmem_init(comp_name) || malloc_and_export(comp_name, comp_id) )
-    {
+    if ( shmem_init(comp_name) || malloc_and_export(comp_name, comp_id) ) {
         hal_exit(comp_id);
         return -1;
     }
 
     // TODO - gpio cleanup too
-    pwm_cleanup(0);
+    pwm_cleanup(1);
 #if ENC_MODULE_ENABLED
-    enc_cleanup(0);
+    enc_cleanup(1);
 #endif
     hal_ready(comp_id);
 
@@ -962,9 +941,9 @@ int32_t rtapi_app_main(void)
 void rtapi_app_exit(void)
 {
     // TODO - gpio cleanup too
-    pwm_cleanup(0);
+    pwm_cleanup(1);
 #if ENC_MODULE_ENABLED
-    enc_cleanup(0);
+    enc_cleanup(1);
 #endif
     shmem_deinit();
     hal_exit(comp_id);
