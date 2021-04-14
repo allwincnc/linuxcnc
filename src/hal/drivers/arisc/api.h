@@ -91,6 +91,7 @@ typedef struct
 enum
 {
     PWM_CH_POS,
+    PWM_CH_POS_CMD,
     PWM_CH_TICK,
     PWM_CH_TIMEOUT,
 
@@ -98,6 +99,7 @@ enum
     PWM_CH_P_PORT,
     PWM_CH_P_PIN_MSK,
     PWM_CH_P_PIN_MSKN,
+    PWM_CH_P_STATE,
     PWM_CH_P_T0,
     PWM_CH_P_T1,
     PWM_CH_P_STOP,
@@ -106,6 +108,7 @@ enum
     PWM_CH_D_PORT,
     PWM_CH_D_PIN_MSK,
     PWM_CH_D_PIN_MSKN,
+    PWM_CH_D_STATE,
     PWM_CH_D_T0,
     PWM_CH_D_T1,
     PWM_CH_D,
@@ -532,7 +535,9 @@ int32_t pwm_ch_data_set(uint32_t c, uint32_t name, uint32_t value, uint32_t safe
         if ( name >= PWM_CH_DATA_CNT ) return -2;
     }
     _pwm_spin_lock();
-    *_pwmc[c][name] = (name == PWM_CH_POS) ? (int32_t)value : value;
+    *_pwmc[c][name] = (name == PWM_CH_POS || name == PWM_CH_POS_CMD) ?
+        (int32_t)value :
+        value;
     _pwm_spin_unlock();
     return 0;
 }
@@ -595,9 +600,11 @@ int32_t pwm_ch_pins_setup (
     *_pwmc[c][PWM_CH_P_PORT] = p_port;
     *_pwmc[c][PWM_CH_P_PIN_MSK] = 1UL << p_pin;
     *_pwmc[c][PWM_CH_P_PIN_MSKN] = ~(1UL << p_pin);
+    *_pwmc[c][PWM_CH_P_STATE] = 0;
     *_pwmc[c][PWM_CH_D_PORT] = d_port;
     *_pwmc[c][PWM_CH_D_PIN_MSK] = 1UL << d_pin;
     *_pwmc[c][PWM_CH_D_PIN_MSKN] = ~(1UL << d_pin);
+    *_pwmc[c][PWM_CH_D_STATE] = 0;
     _pwm_spin_unlock();
 
     return 0;
@@ -644,7 +651,6 @@ int32_t pwm_ch_times_setup (
     d_t1 = d_t1 < PWM_WASTED_TICKS ? 0 : d_t1 - PWM_WASTED_TICKS;
 
     _pwm_spin_lock();
-    *_pwmc[c][PWM_CH_P_BUSY] = 1;
     *_pwmc[c][PWM_CH_P_T0] = p_t0;
     *_pwmc[c][PWM_CH_P_T1] = p_t1;
     *_pwmc[c][PWM_CH_D_T0] = d_t0;
@@ -652,30 +658,8 @@ int32_t pwm_ch_times_setup (
     *_pwmc[c][PWM_CH_D_CHANGE] = d_change;
     _pwm_spin_unlock();
 
-    return 0;
-}
+    pwm_ch_state_set(c, 1, 1);
 
-static inline
-int32_t pwm_ch_pos_get(uint32_t c, uint32_t safe)
-{
-    if ( safe ) {
-        if ( c >= PWM_CH_MAX_CNT ) return 0;
-    }
-    _pwm_spin_lock();
-    int32_t value = (int32_t) *_pwmc[c][PWM_CH_POS];
-    _pwm_spin_unlock();
-    return value;
-}
-
-static inline
-int32_t pwm_ch_pos_set(uint32_t c, int32_t pos, uint32_t safe)
-{
-    if ( safe ) {
-        if ( c >= PWM_CH_MAX_CNT ) return -1;
-    }
-    _pwm_spin_lock();
-    *_pwmc[c][PWM_CH_POS] = (uint32_t) pos;
-    _pwm_spin_unlock();
     return 0;
 }
 
