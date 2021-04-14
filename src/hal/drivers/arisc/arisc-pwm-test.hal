@@ -25,12 +25,12 @@ setp arisc.pwm.2.dir-port 0 # PA
 setp arisc.pwm.2.dir-pin 1
 setp arisc.pwm.2.dc-cmd 0.5 # 50%
 setp arisc.pwm.2.pos-scale 1000.0
-setp arisc.pwm.2.pos-cmd 0.123 # 1000.0 * 0.123 = 123 pulses in the 1st period
+setp arisc.pwm.2.pos-cmd 0.1 # 1000.0 * 0.1 = 100 pulses in the 1st period
 
 start
 
-setp arisc.pwm.0.enable 1
-setp arisc.pwm.1.enable 1
-setp arisc.pwm.2.enable 1
+#setp arisc.pwm.0.enable 1
+#setp arisc.pwm.1.enable 1
+#setp arisc.pwm.2.enable 1
 
-show all
+show pin arisc.pwm
