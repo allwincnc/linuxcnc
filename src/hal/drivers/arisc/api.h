@@ -630,12 +630,10 @@ int32_t pwm_ch_times_setup (
         return 0;
     }
 
-    d_change = (p_freq_mHz > 0 && (*_pwmc[c][PWM_CH_D])) ||
-               (p_freq_mHz < 0 && !(*_pwmc[c][PWM_CH_D])) ? 1 : 0;
-    d_change = (p_duty_s32 > 0 && (*_pwmc[c][PWM_CH_D])) ||
-               (p_duty_s32 < 0 && !(*_pwmc[c][PWM_CH_D])) ?
-                   (d_change ? 0 : 1) :
-                   (d_change ? 1 : 0) ;
+    d_change =  (p_freq_mHz > 0 && (*_pwmc[c][PWM_CH_D])) ||
+                (p_freq_mHz < 0 && !(*_pwmc[c][PWM_CH_D])) ? 1 : 0;
+    d_change != (p_duty_s32 > 0 && (*_pwmc[c][PWM_CH_D])) ||
+                (p_duty_s32 < 0 && !(*_pwmc[c][PWM_CH_D])) ? 1 : 0;
 
     p_duty_s32 = p_duty_s32 < 0 ? -p_duty_s32 : p_duty_s32;
     p_freq_mHz = p_freq_mHz < 0 ? -p_freq_mHz : p_freq_mHz;
