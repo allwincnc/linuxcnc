@@ -8,9 +8,11 @@
 
 #include "api.h"
 
+#ifdef RTAPI
 MODULE_AUTHOR("MX_Master");
-MODULE_DESCRIPTION("ARISC driver for the Allwinner ARISC firmware");
+MODULE_DESCRIPTION("Driver for the Allwinner ARISC firmware");
 MODULE_LICENSE("GPL");
+#endif
 
 
 
@@ -19,17 +21,25 @@ static int32_t comp_id;
 static const uint8_t * comp_name = "arisc";
 
 static int8_t *in = "";
+#ifdef RTAPI
 RTAPI_MP_STRING(in, "input pins, comma separated");
+#endif
 
 static int8_t *out = "";
+#ifdef RTAPI
 RTAPI_MP_STRING(out, "output pins, comma separated");
+#endif
 
 static char *pwm = "";
+#ifdef RTAPI
 RTAPI_MP_STRING(pwm, "channels control type, comma separated");
+#endif
 
 #if ENC_MODULE_ENABLED
 static char *encoders = "0";
+#ifdef RTAPI
 RTAPI_MP_STRING(encoders, "number of encoder channels");
+#endif
 #endif
 
 static const char *gpio_name[GPIO_PORTS_MAX_CNT] =
@@ -74,6 +84,7 @@ typedef struct
     hal_float_t *dc_scale; // io
     hal_float_t *dc_min; // io
     hal_float_t *dc_max; // io
+    hal_u32_t *dc_max_t; // io
     hal_float_t *dc_offset; // io
 
     hal_float_t *pos_cmd; // in
@@ -110,6 +121,7 @@ typedef struct
     hal_float_t dc_scale; // io
     hal_float_t dc_min; // io
     hal_float_t dc_max; // io
+    hal_u32_t *dc_max_t; // io
     hal_float_t dc_offset; // io
 
     hal_float_t pos_cmd; // in
@@ -129,6 +141,7 @@ typedef struct
     hal_u32_t ctrl_type;
     hal_s32_t freq_mHz;
     hal_s32_t dc_s32;
+    int64_t pos;
 }
 pwm_ch_priv_t;
 
@@ -424,6 +437,7 @@ int32_t malloc_and_export(const char *comp_name, int32_t comp_id)
             EXPORT_PIN(HAL_IN,float,dc_cmd,"dc-cmd", 0.0);
             EXPORT_PIN(HAL_IO,float,dc_min,"dc-min", -1.0);
             EXPORT_PIN(HAL_IO,float,dc_max,"dc-max", 1.0);
+            EXPORT_PIN(HAL_IO,u32,dc_max_t,"dc-max-t", 0);
             EXPORT_PIN(HAL_IO,float,dc_offset,"dc-offset", 0.0);
             EXPORT_PIN(HAL_IO,float,dc_scale,"dc-scale", 1.0);
 
@@ -444,6 +458,7 @@ int32_t malloc_and_export(const char *comp_name, int32_t comp_id)
             pp.ctrl_type = type[ch];
             pp.freq_mHz = 0;
             pp.dc_s32 = 0;
+            pp.pos = 0;
         }
         if ( r ) {
             rtapi_print_msg(RTAPI_MSG_ERR, "%s.pwm: HAL pins export failed\n", comp_name);
@@ -452,6 +467,8 @@ int32_t malloc_and_export(const char *comp_name, int32_t comp_id)
 
         #undef EXPORT_PIN
     }
+
+    pwm_data_set(PWM_CH_CNT, pwm_ch_cnt, 1);
 
 #if ENC_MODULE_ENABLED
     // get encoder channels count
@@ -662,12 +679,26 @@ static inline
 int32_t pwm_get_new_freq(uint8_t ch, long period)
 {
     int32_t freq = 0;
+    int64_t pos_new;
 
     switch ( pp.ctrl_type )
     {
         case PWM_CTRL_BY_POS: {
-            pp.counts = (int32_t) (ph.pos_scale * ph.pos_cmd);
-            freq = (pp.counts - ph.counts) * period;
+#if 1
+            ph.counts = pwm_ch_data_get(ch, PWM_CH_POS, 1);
+            pp.counts = (int32_t)(pp.pos_cmd * ph.pos_scale);
+            if ( abs(pp.counts - ph.counts) < 10 ) {
+                ph.pos_fb = pp.pos_cmd;
+            } else {
+                ph.pos_fb = ((hal_float_t)ph.counts) / ph.pos_scale;
+            }
+            freq = (int32_t) ((ph.pos_cmd - ph.pos_fb) * ph.pos_scale * period);
+            pp.pos_cmd = ph.pos_cmd;
+#else
+            // just for testing
+            freq = (int32_t) ((ph.pos_cmd - pp.pos_cmd) * ph.pos_scale * period);
+            pp.pos_cmd = ph.pos_cmd;
+#endif
             break;
         }
         case PWM_CTRL_BY_VEL: {
@@ -694,28 +725,13 @@ int32_t pwm_get_new_freq(uint8_t ch, long period)
             pp.freq_cmd = ph.freq_cmd;
             if ( ph.freq_cmd < 1e-20 && ph.freq_cmd > -1e-20 ) break;
             freq = (int32_t) round(ph.freq_cmd * 1000);
+            break;
         }
     }
 
     ph.freq_fb = freq ? ((hal_float_t) freq) / 1000 : 0.0;
 
-    // setup pulses count watchdog
-    if ( pp.ctrl_type == PWM_CTRL_BY_POS ) {
-        pwm_ch_data_set(ch, PWM_CH_POS_CMD, pp.counts, 0);
-    } else {
-        pwm_ch_data_set(ch, PWM_CH_POS_CMD, pp.counts < 0 ? pp.counts - 10 : pp.counts + 10, 0);
-    }
-
     return freq;
-}
-
-static inline
-uint32_t pwm_pins_ok(uint8_t ch)
-{
-    if ( ph.pwm_port >= GPIO_PORTS_MAX_CNT || ph.pwm_pin >= GPIO_PINS_MAX_CNT ||
-         ph.dir_port >= GPIO_PORTS_MAX_CNT || ph.dir_pin >= GPIO_PINS_MAX_CNT ) return 0;
-
-    return 1;
 }
 
 static inline
@@ -731,29 +747,35 @@ void pwm_pins_update(uint8_t ch)
     if ( pp.dir_pin  != ph.dir_pin )  { pp.dir_pin  = ph.dir_pin;  upd++; }
     if ( pp.dir_inv  != ph.dir_inv )  { pp.dir_inv  = ph.dir_inv;  upd++; }
 
-    if ( upd && pwm_pins_ok(ch) ) {
-        pwm_ch_pins_setup(ch, ph.pwm_port, ph.pwm_pin, ph.pwm_inv,
-                              ph.dir_port, ph.dir_pin, ph.dir_inv, 0);
-    }
+    if ( upd ) pwm_ch_pins_setup(ch, ph.pwm_port, ph.pwm_pin, ph.pwm_inv,
+                                     ph.dir_port, ph.dir_pin, ph.dir_inv, 1);
 }
 
 static
 void pwm_read(void *arg, long period)
 {
     static int32_t ch;
-
-    for ( ch = pwm_ch_cnt; ch--; )
-    {
+    for ( ch = pwm_ch_cnt; ch--; ) {
         if ( !ph.enable ) continue;
-
-        ph.counts = pwm_ch_data_get(ch, PWM_CH_POS, 0);
 
         if ( ph.pos_scale < 1e-20 && ph.pos_scale > -1e-20 ) ph.pos_scale = 1.0;
 
         if ( pp.ctrl_type == PWM_CTRL_BY_POS ) {
-            ph.pos_fb = abs(pp.counts - ph.counts) < 10 ?
-                ph.pos_cmd :
-                ((hal_float_t)ph.counts) / ph.pos_scale ;
+#if 0
+            ph.counts = (int32_t) pwm_ch_data_get(ch, PWM_CH_POS, 1);
+            pp.counts = (int32_t) (ph.pos_scale * ph.pos_cmd);
+            // say `it's ok` to HAL until feedback error is small
+            if ( abs(pp.counts - ph.counts) < 100 ) {
+                ph.counts = pp.counts;
+                ph.pos_fb = ph.pos_cmd;
+            } else {
+                ph.pos_fb = ((hal_float_t)ph.counts) / ph.pos_scale;
+            }
+#else
+            pp.counts = (int32_t) (ph.pos_scale * ph.pos_cmd);
+            ph.counts = pp.counts;
+            ph.pos_fb = ph.pos_cmd;
+#endif
         } else {
             ph.pos_fb = ((hal_float_t)ph.counts) / ph.pos_scale;
         }
@@ -763,25 +785,17 @@ void pwm_read(void *arg, long period)
 static
 void pwm_write(void *arg, long period)
 {
-    static int32_t freq, dc, ch, update;
-
-    for ( ch = pwm_ch_cnt; ch--; )
-    {
+    static int32_t ch, dc, f;
+    for ( ch = pwm_ch_cnt; ch--; ) {
         if ( !ph.enable ) continue;
-
         pwm_pins_update(ch);
-        if ( !pwm_pins_ok(ch) ) { pwm_ch_state_set(ch, 0, 0); continue; };
-
         dc = pwm_get_new_dc(ch);
-        freq = pwm_get_new_freq(ch, period);
-        update = 0;
-
-        if ( pp.freq_mHz != freq ) { pp.freq_mHz = freq; update++; }
-        if ( pp.dc_s32 != dc ) { pp.dc_s32 = dc; update++; }
-        if ( pp.dir_hold != ph.dir_hold ) { pp.dir_hold = ph.dir_hold; update++; }
-        if ( pp.dir_setup != ph.dir_setup ) { pp.dir_setup = ph.dir_setup; update++; }
-
-        if ( update ) pwm_ch_times_setup(ch, pp.freq_mHz, pp.dc_s32, pp.dir_hold, pp.dir_setup, 1);
+        f = pwm_get_new_freq(ch, period);
+        if ( pp.freq_mHz != f || pp.dc_s32 != dc ) {
+            pwm_ch_times_setup(ch, f, dc, ph.dc_max_t, ph.dir_hold, ph.dir_setup, 1);
+            pp.dc_s32 = dc;
+            pp.freq_mHz = f;
+        }
     }
 }
 
@@ -905,16 +919,21 @@ int32_t rtapi_app_main(void)
         PRINT_ERROR_AND_RETURN("ERROR: hal_init() failed\n",-1);
     }
 
-    if ( shmem_init(comp_name) || malloc_and_export(comp_name, comp_id) ) {
+    if ( shmem_init(comp_name) ) {
         hal_exit(comp_id);
         return -1;
     }
 
-    // TODO - gpio cleanup too
     pwm_cleanup(1);
 #if ENC_MODULE_ENABLED
     enc_cleanup(1);
 #endif
+
+    if ( malloc_and_export(comp_name, comp_id) ) {
+        hal_exit(comp_id);
+        return -1;
+    }
+
     hal_ready(comp_id);
 
     return 0;
@@ -922,7 +941,6 @@ int32_t rtapi_app_main(void)
 
 void rtapi_app_exit(void)
 {
-    // TODO - gpio cleanup too
     pwm_cleanup(1);
 #if ENC_MODULE_ENABLED
     enc_cleanup(1);

@@ -91,27 +91,25 @@ typedef struct
 enum
 {
     PWM_CH_POS,
-    PWM_CH_POS_CMD,
     PWM_CH_TICK,
     PWM_CH_TIMEOUT,
+    PWM_CH_STATE,
 
-    PWM_CH_P_BUSY,
     PWM_CH_P_PORT,
     PWM_CH_P_PIN_MSK,
     PWM_CH_P_PIN_MSKN,
-    PWM_CH_P_STATE,
+    PWM_CH_P_INV,
     PWM_CH_P_T0,
     PWM_CH_P_T1,
     PWM_CH_P_STOP,
 
-    PWM_CH_D_BUSY,
     PWM_CH_D_PORT,
     PWM_CH_D_PIN_MSK,
     PWM_CH_D_PIN_MSKN,
-    PWM_CH_D_STATE,
+    PWM_CH_D,
+    PWM_CH_D_INV,
     PWM_CH_D_T0,
     PWM_CH_D_T1,
-    PWM_CH_D,
     PWM_CH_D_CHANGE,
 
     PWM_CH_DATA_CNT
@@ -124,6 +122,15 @@ enum
     PWM_ARISC_LOCK,
     PWM_CH_CNT,
     PWM_DATA_CNT
+};
+
+enum
+{
+    PWM_CH_STATE_IDLE,
+    PWM_CH_STATE_P0,
+    PWM_CH_STATE_P1,
+    PWM_CH_STATE_D0,
+    PWM_CH_STATE_D1
 };
 
 #define PWM_SHM_BASE         (ARISC_SHM_BASE)
@@ -179,6 +186,7 @@ enum
 #define ENC_SHM_CH_DATA_BASE (ENC_SHM_DATA_BASE + ENC_DATA_CNT*4)
 #define ENC_SHM_SIZE         (ENC_SHM_CH_DATA_BASE + ENC_CH_MAX_CNT*ENC_CH_DATA_CNT*4 - ENC_SHM_BASE)
 #endif
+
 
 
 
@@ -484,11 +492,19 @@ int32_t pwm_cleanup(uint32_t safe)
 
     for ( c = PWM_CH_MAX_CNT; c--; ) {
         // reset configured pins state
-        if ( *_pwmc[c][PWM_CH_P_PORT] >= GPIO_PORTS_MAX_CNT && *_pwmc[c][PWM_CH_P_PIN_MSKN] ) {
-            _GPIO[ *_pwmc[c][PWM_CH_P_PORT] ]->data &= *_pwmc[c][PWM_CH_P_PIN_MSKN];
+        if ( *_pwmc[c][PWM_CH_P_PORT] < GPIO_PORTS_MAX_CNT && *_pwmc[c][PWM_CH_P_PIN_MSK] ) {
+            if ( *_pwmc[c][PWM_CH_P_INV] ) {
+                _GPIO[ *_pwmc[c][PWM_CH_P_PORT] ]->data |= *_pwmc[c][PWM_CH_P_PIN_MSK];
+            } else {
+                _GPIO[ *_pwmc[c][PWM_CH_P_PORT] ]->data &= *_pwmc[c][PWM_CH_P_PIN_MSKN];
+            }
         }
-        if ( *_pwmc[c][PWM_CH_D_PORT] >= GPIO_PORTS_MAX_CNT && *_pwmc[c][PWM_CH_D_PIN_MSKN] ) {
-            _GPIO[ *_pwmc[c][PWM_CH_D_PORT] ]->data &= *_pwmc[c][PWM_CH_D_PIN_MSKN];
+        if ( *_pwmc[c][PWM_CH_D_PORT] < GPIO_PORTS_MAX_CNT && *_pwmc[c][PWM_CH_D_PIN_MSK] ) {
+            if ( *_pwmc[c][PWM_CH_D_INV] ) {
+                _GPIO[ *_pwmc[c][PWM_CH_D_PORT] ]->data |= *_pwmc[c][PWM_CH_D_PIN_MSK];
+            } else {
+                _GPIO[ *_pwmc[c][PWM_CH_D_PORT] ]->data &= *_pwmc[c][PWM_CH_D_PIN_MSKN];
+            }
         }
         // reset channel's data
         for ( d = PWM_CH_DATA_CNT; d--; ) *_pwmc[c][d] = 0;
@@ -535,9 +551,7 @@ int32_t pwm_ch_data_set(uint32_t c, uint32_t name, uint32_t value, uint32_t safe
         if ( name >= PWM_CH_DATA_CNT ) return -2;
     }
     _pwm_spin_lock();
-    *_pwmc[c][name] = (name == PWM_CH_POS || name == PWM_CH_POS_CMD) ?
-        (int32_t)value :
-        value;
+    *_pwmc[c][name] = value;
     _pwm_spin_unlock();
     return 0;
 }
@@ -553,22 +567,6 @@ uint32_t pwm_ch_data_get(uint32_t c, uint32_t name, uint32_t safe)
     uint32_t value = *_pwmc[c][name];
     _pwm_spin_unlock();
     return value;
-}
-
-static inline
-int32_t pwm_ch_state_set(uint32_t c, uint32_t enable, uint32_t safe )
-{
-    if ( safe ) {
-        if ( c >= PWM_CH_MAX_CNT ) return -1;
-    }
-    _pwm_spin_lock();
-    if ( *_pwmc[c][PWM_CH_P_BUSY] ) *_pwmc[c][PWM_CH_P_STOP] = !enable;
-    if ( enable ) {
-        *_pwmc[c][PWM_CH_P_BUSY] = 1;
-        if ( c >= *_pwmd[PWM_CH_CNT] ) *_pwmd[PWM_CH_CNT] = c+1;
-    }
-    _pwm_spin_unlock();
-    return 0;
 }
 
 static inline
@@ -600,11 +598,12 @@ int32_t pwm_ch_pins_setup (
     *_pwmc[c][PWM_CH_P_PORT] = p_port;
     *_pwmc[c][PWM_CH_P_PIN_MSK] = 1UL << p_pin;
     *_pwmc[c][PWM_CH_P_PIN_MSKN] = ~(1UL << p_pin);
-    *_pwmc[c][PWM_CH_P_STATE] = 0;
+    *_pwmc[c][PWM_CH_P_INV] = p_inv;
     *_pwmc[c][PWM_CH_D_PORT] = d_port;
     *_pwmc[c][PWM_CH_D_PIN_MSK] = 1UL << d_pin;
     *_pwmc[c][PWM_CH_D_PIN_MSKN] = ~(1UL << d_pin);
-    *_pwmc[c][PWM_CH_D_STATE] = 0;
+    *_pwmc[c][PWM_CH_D_INV] = d_inv;
+    *_pwmc[c][PWM_CH_D] = 0;
     _pwm_spin_unlock();
 
     return 0;
@@ -613,27 +612,41 @@ int32_t pwm_ch_pins_setup (
 static inline
 int32_t pwm_ch_times_setup (
     uint32_t c,
-    int32_t p_freq_mHz, int32_t p_duty_s32,
+    int32_t p_freq_mHz, int32_t p_duty_s32, uint32_t p_duty_max_time_ns,
     uint32_t d_hold_ns, uint32_t d_setup_ns,
-    uint32_t safe )
-{
-    uint32_t p_t0, p_t1, p_period, d_t0, d_t1, d_change, ch;
+    uint32_t safe
+) {
+    uint32_t p_t0, p_t1, p_t1_max, p_period, d_t0, d_t1;
+    int32_t d;
 
     if ( safe ) {
         if ( c >= PWM_CH_MAX_CNT ) return -1;
+
         if ( !d_hold_ns ) d_hold_ns = 50000;
         if ( !d_setup_ns ) d_setup_ns = 50000;
+
+        // disable channel if it's pins wasn't setup properly
+        if (  *_pwmc[c][PWM_CH_P_PORT] >= GPIO_PORTS_MAX_CNT ||
+              *_pwmc[c][PWM_CH_D_PORT] >= GPIO_PORTS_MAX_CNT ||
+            !(*_pwmc[c][PWM_CH_P_PIN_MSK]) ||
+            !(*_pwmc[c][PWM_CH_D_PIN_MSK])
+        ) {
+            _pwm_spin_lock();
+            *_pwmc[c][PWM_CH_STATE] = PWM_CH_STATE_IDLE;
+            _pwm_spin_unlock();
+            return 0;
+        }
     }
 
+    // stop channel if frequency/duty_cycle == 0
     if ( !p_freq_mHz || !p_duty_s32 ) {
-        pwm_ch_state_set(c, 0, 1);
+        _pwm_spin_lock();
+        if ( *_pwmc[c][PWM_CH_STATE] ) *_pwmc[c][PWM_CH_P_STOP] = 1;
+        _pwm_spin_unlock();
         return 0;
     }
 
-    d_change =  (p_freq_mHz > 0 && (*_pwmc[c][PWM_CH_D])) ||
-                (p_freq_mHz < 0 && !(*_pwmc[c][PWM_CH_D])) ? 1 : 0;
-    d_change != (p_duty_s32 > 0 && (*_pwmc[c][PWM_CH_D])) ||
-                (p_duty_s32 < 0 && !(*_pwmc[c][PWM_CH_D])) ? 1 : 0;
+    d = (p_freq_mHz < 0 ? -1 : 1) * (p_duty_s32 < 0 ? -1 : 1);
 
     p_duty_s32 = p_duty_s32 < 0 ? -p_duty_s32 : p_duty_s32;
     p_freq_mHz = p_freq_mHz < 0 ? -p_freq_mHz : p_freq_mHz;
@@ -641,6 +654,12 @@ int32_t pwm_ch_times_setup (
     p_period = (uint32_t) ( ((uint64_t)ARISC_CPU_FREQ) * ((uint64_t)1000) / ((uint64_t)p_freq_mHz) );
     p_period = p_period < (2*PWM_WASTED_TICKS) ? 0 : p_period - (2*PWM_WASTED_TICKS);
     p_t1 = (uint32_t) ( ((uint64_t)p_period) * ((uint64_t)p_duty_s32) / ((uint64_t)INT32_MAX) );
+
+    if ( p_duty_max_time_ns ) {
+        p_t1_max = ((uint64_t)ARISC_CPU_FREQ) * ((uint64_t)p_duty_max_time_ns) / ((uint64_t)1000000000);
+        if ( p_t1 > p_t1_max ) p_t1 = p_t1_max;
+    }
+
     p_t0 = p_period - p_t1;
 
     d_t0 = ARISC_CPU_FREQ / (1000000000 / d_hold_ns);
@@ -649,16 +668,57 @@ int32_t pwm_ch_times_setup (
     d_t1 = d_t1 < PWM_WASTED_TICKS ? 0 : d_t1 - PWM_WASTED_TICKS;
 
     _pwm_spin_lock();
+
+    *_pwmc[c][PWM_CH_D_CHANGE] = (d > 0 &&  (*_pwmc[c][PWM_CH_D])) ||
+                                 (d < 0 && !(*_pwmc[c][PWM_CH_D])) ? 1 : 0;
+
+    switch ( *_pwmc[c][PWM_CH_STATE] ) {
+        case PWM_CH_STATE_IDLE: { *_pwmc[c][PWM_CH_STATE] = PWM_CH_STATE_P0; break; }
+        case PWM_CH_STATE_P0: { *_pwmc[c][PWM_CH_TIMEOUT] = p_t0; break; }
+        case PWM_CH_STATE_P1: { *_pwmc[c][PWM_CH_TIMEOUT] = p_t1; break; }
+        case PWM_CH_STATE_D0: { *_pwmc[c][PWM_CH_TIMEOUT] = d_t0; break; }
+        case PWM_CH_STATE_D1: { *_pwmc[c][PWM_CH_TIMEOUT] = d_t1; break; }
+    }
+
     *_pwmc[c][PWM_CH_P_T0] = p_t0;
     *_pwmc[c][PWM_CH_P_T1] = p_t1;
     *_pwmc[c][PWM_CH_D_T0] = d_t0;
     *_pwmc[c][PWM_CH_D_T1] = d_t1;
-    *_pwmc[c][PWM_CH_D_CHANGE] = d_change;
+
     _pwm_spin_unlock();
 
-    pwm_ch_state_set(c, 1, 1);
-
     return 0;
+}
+
+// get channel's position in milli-pulses
+static inline
+int64_t pwm_ch_pos_get(uint32_t c, uint32_t safe)
+{
+    int64_t pos = 0, a = 0, t = 0;
+
+    if ( safe ) {
+        if ( c >= PWM_CH_MAX_CNT ) return 0;
+    }
+
+    _pwm_spin_lock();
+
+    pos = ((int64_t)((int32_t)*_pwmc[c][PWM_CH_POS])) * ((int64_t)1000000);
+
+    switch ( *_pwmc[c][PWM_CH_STATE] ) {
+        case PWM_CH_STATE_P0: { t = *_pwmc[c][PWM_CH_P_T1]; break; }
+        case PWM_CH_STATE_P1: { t = *_pwmc[c][PWM_CH_P_T0]; break; }
+    }
+
+    if ( t ) {
+        a = ((int64_t)1000000)
+          * (t + ((int64_t)(*_pwmd[PWM_TIMER_TICK] - *_pwmc[c][PWM_CH_TICK])))
+          / ((int64_t)(*_pwmc[c][PWM_CH_P_T0] + *_pwmc[c][PWM_CH_P_T1]));
+        a = *_pwmc[c][PWM_CH_D] ? -a : a;
+    }
+
+    _pwm_spin_unlock();
+
+    return pos + a;
 }
 
 
