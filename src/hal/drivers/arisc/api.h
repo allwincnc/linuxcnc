@@ -94,6 +94,7 @@ enum
     PWM_CH_TICK,
     PWM_CH_TIMEOUT,
     PWM_CH_STATE,
+    PWM_CH_WATCHDOG,
 
     PWM_CH_P_PORT,
     PWM_CH_P_PIN_MSK,

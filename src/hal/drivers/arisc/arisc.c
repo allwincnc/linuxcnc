@@ -789,6 +789,7 @@ void pwm_write(void *arg, long period)
     for ( ch = pwm_ch_cnt; ch--; ) {
         if ( !ph.enable ) continue;
         pwm_pins_update(ch);
+        pwm_ch_data_set(ch, PWM_CH_WATCHDOG, 1000, 1);
         dc = pwm_get_new_dc(ch);
         f = pwm_get_new_freq(ch, period);
         if ( pp.freq_mHz != f || pp.dc_s32 != dc ) {
