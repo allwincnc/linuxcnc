@@ -1,0 +1,72 @@
+# load RT components
+loadrt [KINS]KINEMATICS
+loadrt [EMCMOT]EMCMOT base_period_nsec=[EMCMOT]BASE_PERIOD servo_period_nsec=[EMCMOT]SERVO_PERIOD num_joints=[KINS]JOINTS
+loadrt arisc pwm="p,p,p,f" out="PA1,PC4"
+
+# add RT functions to the servo thread
+addf arisc.gpio.read         servo-thread
+addf arisc.pwm.read          servo-thread
+addf motion-command-handler  servo-thread
+addf motion-controller       servo-thread
+addf arisc.gpio.write        servo-thread
+addf arisc.pwm.write         servo-thread
+
+# axis 0 setup
+# PA12:STEP,  PA11:DIR,  PA1:EN
+setp arisc.pwm.0.pos-scale  [JOINT_0]SCALE
+setp arisc.pwm.0.dc-cmd     0.5 # 50%
+setp arisc.pwm.0.dc-max-t   5000
+setp arisc.pwm.0.dir-hold   50000
+setp arisc.pwm.0.dir-setup  50000
+setp arisc.pwm.0.pwm-port   0 # PA
+setp arisc.pwm.0.pwm-pin    12
+setp arisc.pwm.0.dir-port   0 # PA
+setp arisc.pwm.0.dir-pin    11
+net x-pos-cmd  joint.0.motor-pos-cmd   arisc.pwm.0.pos-cmd
+net x-pos-fb   joint.0.motor-pos-fb    arisc.pwm.0.pos-fb
+net x-en       joint.0.amp-enable-out  arisc.pwm.0.enable  arisc.gpio.PA1-out
+
+# axis 1 setup
+# PA6:STEP,  PA13:DIR,  PA1:EN
+setp arisc.pwm.1.pos-scale  [JOINT_1]SCALE
+setp arisc.pwm.1.dc-cmd     0.5 # 50%
+setp arisc.pwm.1.dc-max-t   5000
+setp arisc.pwm.1.dir-hold   50000
+setp arisc.pwm.1.dir-setup  50000
+setp arisc.pwm.1.pwm-port   0 # PA
+setp arisc.pwm.1.pwm-pin    6
+setp arisc.pwm.1.dir-port   0 # PA
+setp arisc.pwm.1.dir-pin    13
+net y-pos-cmd  joint.1.motor-pos-cmd   arisc.pwm.1.pos-cmd
+net y-pos-fb   joint.1.motor-pos-fb    arisc.pwm.1.pos-fb
+net y-en       joint.1.amp-enable-out  arisc.pwm.1.enable
+
+# axis 2 setup
+# PA14:STEP,  PD14:DIR,  PA1:EN
+setp arisc.pwm.2.pos-scale  [JOINT_2]SCALE
+setp arisc.pwm.2.dc-cmd     0.5 # 50%
+setp arisc.pwm.2.dc-max-t   5000
+setp arisc.pwm.2.dir-hold   50000
+setp arisc.pwm.2.dir-setup  50000
+setp arisc.pwm.2.pwm-port   0 # PA
+setp arisc.pwm.2.pwm-pin    14
+setp arisc.pwm.2.dir-port   3 # PD
+setp arisc.pwm.2.dir-pin    14
+net z-pos-cmd  joint.2.motor-pos-cmd   arisc.pwm.2.pos-cmd
+net z-pos-fb   joint.2.motor-pos-fb    arisc.pwm.2.pos-fb
+net z-en       joint.2.amp-enable-out  arisc.pwm.2.enable
+
+# spindle setup
+# PA0:PWM,  PA3:DIR,  PC4:EN
+setp arisc.pwm.3.freq-cmd    100.0 # Hz
+setp arisc.pwm.3.dc-scale    24000.0 # max RPM
+setp arisc.pwm.3.pwm-port    0 # PA
+setp arisc.pwm.3.pwm-pin     0
+setp arisc.pwm.3.dir-port    0 # PA
+setp arisc.pwm.3.dir-pin     3
+setp arisc.pwm.3.dir-invert  1
+net s-rpm  spindle.0.speed-out  arisc.pwm.3.dc-cmd
+net s-en   spindle.0.on         arisc.pwm.3.enable  arisc.gpio.PC4-out
+
+# other IO setup
+net estop  iocontrol.0.user-enable-out  iocontrol.0.emc-enable-in

@@ -21,8 +21,8 @@ setp arisc.pwm.1.vel-cmd 12.345 # 100.0 * 12.345 = 1234.5 Hz
 
 setp arisc.pwm.2.pwm-port 0 # PA
 setp arisc.pwm.2.pwm-pin 14
-setp arisc.pwm.2.dir-port 0 # PA
-setp arisc.pwm.2.dir-pin 1
+setp arisc.pwm.2.dir-port 3 # PD
+setp arisc.pwm.2.dir-pin 14
 setp arisc.pwm.2.dc-cmd 0.5 # 50%
 setp arisc.pwm.2.pos-scale 1000.0
 setp arisc.pwm.2.pos-cmd 0.1 # 1000.0 * 0.1 = 100 pulses in the 1st period
