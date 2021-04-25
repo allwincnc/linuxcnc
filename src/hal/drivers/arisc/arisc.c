@@ -141,7 +141,6 @@ typedef struct
     hal_u32_t ctrl_type;
     hal_s32_t freq_mHz;
     hal_s32_t dc_s32;
-    int64_t pos;
 }
 pwm_ch_priv_t;
 
@@ -398,9 +397,9 @@ int32_t malloc_and_export(const char *comp_name, int32_t comp_id)
         // export PWM HAL functions
         r = 0;
         rtapi_snprintf(name, sizeof(name), "%s.pwm.write", comp_name);
-        r += hal_export_funct(name, pwm_write, 0, 0, 0, comp_id);
+        r += hal_export_funct(name, pwm_write, 0, 1, 0, comp_id);
         rtapi_snprintf(name, sizeof(name), "%s.pwm.read", comp_name);
-        r += hal_export_funct(name, pwm_read, 0, 0, 0, comp_id);
+        r += hal_export_funct(name, pwm_read, 0, 1, 0, comp_id);
         if ( r ) {
             rtapi_print_msg(RTAPI_MSG_ERR, "%s.pwm: HAL functions export failed\n", comp_name);
             return -1;
@@ -458,7 +457,6 @@ int32_t malloc_and_export(const char *comp_name, int32_t comp_id)
             pp.ctrl_type = type[ch];
             pp.freq_mHz = 0;
             pp.dc_s32 = 0;
-            pp.pos = 0;
         }
         if ( r ) {
             rtapi_print_msg(RTAPI_MSG_ERR, "%s.pwm: HAL pins export failed\n", comp_name);
@@ -479,7 +477,7 @@ int32_t malloc_and_export(const char *comp_name, int32_t comp_id)
         // export encoder HAL functions
         r = 0;
         rtapi_snprintf(name, sizeof(name), "%s.encoder.read", comp_name);
-        r += hal_export_funct(name, enc_read, 0, 0, 0, comp_id);
+        r += hal_export_funct(name, enc_read, 0, 1, 0, comp_id);
         if ( r ) {
             rtapi_print_msg(RTAPI_MSG_ERR, "%s.encoder: HAL functions export failed\n", comp_name);
             return -1;
@@ -675,28 +673,42 @@ int32_t pwm_get_new_dc(uint8_t ch)
     return (int32_t) (ph.dc_fb * INT32_MAX);
 }
 
+#define PWM_FREQ_UPDATE_SOFT 1
+#define PWM_FREQ_UPDATE_HARD 0
+#define PWM_FREQ_UPDATE_TEST 0
+
 static inline
 int32_t pwm_get_new_freq(uint8_t ch, long period)
 {
-    int32_t freq = 0;
-    int64_t pos_new;
+    int32_t freq = 0, counts_task;
 
     switch ( pp.ctrl_type )
     {
         case PWM_CTRL_BY_POS: {
-#if 1
+#if PWM_FREQ_UPDATE_SOFT
             ph.counts = pwm_ch_data_get(ch, PWM_CH_POS, 1);
-            pp.counts = (int32_t)(pp.pos_cmd * ph.pos_scale);
+            pp.counts = (int32_t) (pp.pos_cmd * ph.pos_scale);
             if ( abs(pp.counts - ph.counts) < 10 ) {
                 ph.pos_fb = pp.pos_cmd;
             } else {
                 ph.pos_fb = ((hal_float_t)ph.counts) / ph.pos_scale;
             }
-            freq = (int32_t) ((ph.pos_cmd - ph.pos_fb) * ph.pos_scale * period);
+            freq = (int32_t) ((ph.pos_cmd - ph.pos_fb) * ph.pos_scale * rtapi_clock_set_period(0));
+            if ( abs(freq) < 50000 ) freq = 0;
+            else if ( abs(freq) > 500000000 ) freq = 500000000 * (freq < 0 ? -1 : 1);
             pp.pos_cmd = ph.pos_cmd;
-#else
+#endif
+#if PWM_FREQ_UPDATE_HARD
+            pp.counts = (int32_t) (ph.pos_cmd * ph.pos_scale);
+            ph.counts = pwm_ch_data_get(ch, PWM_CH_POS, 1);
+            counts_task = (pp.counts - ph.counts);
+            freq = counts_task * rtapi_clock_set_period(0);
+            pwm_ch_data_set(ch, PWM_CH_WATCHDOG, abs(counts_task), 1);
+#endif
+#if PWM_FREQ_UPDATE_TEST
             // just for testing
-            freq = (int32_t) ((ph.pos_cmd - pp.pos_cmd) * ph.pos_scale * period);
+            freq = rtapi_clock_set_period(0)
+                 * ((int32_t) round((ph.pos_cmd - pp.pos_cmd) * ph.pos_scale));
             pp.pos_cmd = ph.pos_cmd;
 #endif
             break;
@@ -751,6 +763,10 @@ void pwm_pins_update(uint8_t ch)
                                      ph.dir_port, ph.dir_pin, ph.dir_inv, 1);
 }
 
+#define PWM_READ_SOFT 0
+#define PWM_READ_HARD 0
+#define PWM_READ_TEST 1
+
 static
 void pwm_read(void *arg, long period)
 {
@@ -761,7 +777,14 @@ void pwm_read(void *arg, long period)
         if ( ph.pos_scale < 1e-20 && ph.pos_scale > -1e-20 ) ph.pos_scale = 1.0;
 
         if ( pp.ctrl_type == PWM_CTRL_BY_POS ) {
-#if 0
+#if PWM_READ_HARD
+            ph.counts = (int32_t) pwm_ch_data_get(ch, PWM_CH_POS, 1);
+            pp.counts = (int32_t) (ph.pos_cmd * ph.pos_scale);
+            ph.pos_fb = abs(pp.counts - ph.counts) < 10 ?
+                ph.pos_cmd :
+                ((hal_float_t)ph.counts) / ph.pos_scale;
+#endif
+#if PWM_READ_SOFT
             ph.counts = (int32_t) pwm_ch_data_get(ch, PWM_CH_POS, 1);
             pp.counts = (int32_t) (ph.pos_scale * ph.pos_cmd);
             // say `it's ok` to HAL until feedback error is small
@@ -771,7 +794,8 @@ void pwm_read(void *arg, long period)
             } else {
                 ph.pos_fb = ((hal_float_t)ph.counts) / ph.pos_scale;
             }
-#else
+#endif
+#if PWM_READ_TEST
             pp.counts = (int32_t) (ph.pos_scale * ph.pos_cmd);
             ph.counts = pp.counts;
             ph.pos_fb = ph.pos_cmd;
