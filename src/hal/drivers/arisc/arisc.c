@@ -673,44 +673,54 @@ int32_t pwm_get_new_dc(uint8_t ch)
     return (int32_t) (ph.dc_fb * INT32_MAX);
 }
 
-#define PWM_FREQ_UPDATE_SOFT 1
+#define PWM_FREQ_UPDATE_FLOAT 1
+#define PWM_FREQ_UPDATE_SOFT 0
 #define PWM_FREQ_UPDATE_HARD 0
 #define PWM_FREQ_UPDATE_TEST 0
 
 static inline
 int32_t pwm_get_new_freq(uint8_t ch, long period)
 {
-    int32_t freq = 0, counts_task;
+    int32_t freq = 0;
 
     switch ( pp.ctrl_type )
     {
         case PWM_CTRL_BY_POS: {
+#if PWM_FREQ_UPDATE_FLOAT
+            int64_t pos_cmd_64 = (int64_t) (ph.pos_cmd * ph.pos_scale * 1000);
+            int64_t pos_fdb_64 = pwm_ch_pos_get(ch,1);
+            int64_t task_64 = pos_cmd_64 - pos_fdb_64;
+            if ( labs(task_64) < 500 ) freq = 0;
+            else freq = (int32_t) (task_64 * ((int64_t)rtapi_clock_set_period(0)) / 1000);
+#endif
 #if PWM_FREQ_UPDATE_SOFT
             ph.counts = pwm_ch_data_get(ch, PWM_CH_POS, 1);
             pp.counts = (int32_t) (pp.pos_cmd * ph.pos_scale);
-            if ( abs(pp.counts - ph.counts) < 10 ) {
+            int32_t task = pp.counts - ph.counts;
+            if ( abs(task) < 2 ) {
                 ph.pos_fb = pp.pos_cmd;
             } else {
                 ph.pos_fb = ((hal_float_t)ph.counts) / ph.pos_scale;
             }
             freq = (int32_t) ((ph.pos_cmd - ph.pos_fb) * ph.pos_scale * rtapi_clock_set_period(0));
-            if ( abs(freq) < 50000 ) freq = 0;
-            else if ( abs(freq) > 500000000 ) freq = 500000000 * (freq < 0 ? -1 : 1);
             pp.pos_cmd = ph.pos_cmd;
 #endif
 #if PWM_FREQ_UPDATE_HARD
-            pp.counts = (int32_t) (ph.pos_cmd * ph.pos_scale);
+            int32_t counts_task;
+            pp.counts = (int32_t) round(ph.pos_cmd * ph.pos_scale);
             ph.counts = pwm_ch_data_get(ch, PWM_CH_POS, 1);
-            counts_task = (pp.counts - ph.counts);
+            counts_task = pp.counts - ph.counts;
             freq = counts_task * rtapi_clock_set_period(0);
-            pwm_ch_data_set(ch, PWM_CH_WATCHDOG, abs(counts_task), 1);
+//            pwm_ch_data_set(ch, PWM_CH_WATCHDOG, abs(counts_task), 1);
 #endif
 #if PWM_FREQ_UPDATE_TEST
             // just for testing
-            freq = rtapi_clock_set_period(0)
-                 * ((int32_t) round((ph.pos_cmd - pp.pos_cmd) * ph.pos_scale));
+            pp.pos_cmd = pp.pos_cmd * period / rtapi_clock_set_period(0);
+            freq = (int32_t) ((ph.pos_cmd - pp.pos_cmd) * ph.pos_scale * rtapi_clock_set_period(0));
             pp.pos_cmd = ph.pos_cmd;
 #endif
+            if ( abs(freq) < 50000 ) freq = 0;
+            else if ( abs(freq) > 500000000 ) freq = 500000000 * (freq < 0 ? -1 : 1);
             break;
         }
         case PWM_CTRL_BY_VEL: {
@@ -796,8 +806,7 @@ void pwm_read(void *arg, long period)
             }
 #endif
 #if PWM_READ_TEST
-            pp.counts = (int32_t) (ph.pos_scale * ph.pos_cmd);
-            ph.counts = pp.counts;
+            ph.counts = (int32_t) (ph.pos_scale * ph.pos_cmd);
             ph.pos_fb = ph.pos_cmd;
 #endif
         } else {
@@ -813,7 +822,7 @@ void pwm_write(void *arg, long period)
     for ( ch = pwm_ch_cnt; ch--; ) {
         if ( !ph.enable ) continue;
         pwm_pins_update(ch);
-        pwm_ch_data_set(ch, PWM_CH_WATCHDOG, 1000, 1);
+//        pwm_ch_data_set(ch, PWM_CH_WATCHDOG, 1000, 1);
         dc = pwm_get_new_dc(ch);
         f = pwm_get_new_freq(ch, period);
         if ( pp.freq_mHz != f || pp.dc_s32 != dc ) {
