@@ -103,6 +103,7 @@ enum
     PWM_CH_P_T0,
     PWM_CH_P_T1,
     PWM_CH_P_STOP,
+    PWM_CH_P_TICK,
 
     PWM_CH_D_PORT,
     PWM_CH_D_PIN_MSK,
@@ -696,6 +697,8 @@ static inline
 int64_t pwm_ch_pos_get(uint32_t c, uint32_t safe)
 {
     int64_t pos = 0, a = 0, t = 0;
+    int32_t pos32;
+    uint32_t tc, tt;
 
     if ( safe ) {
         if ( c >= PWM_CH_MAX_CNT ) return 0;
@@ -703,18 +706,19 @@ int64_t pwm_ch_pos_get(uint32_t c, uint32_t safe)
 
     _pwm_spin_lock();
 
-    pos = ((int64_t)((int32_t)*_pwmc[c][PWM_CH_POS])) * ((int64_t)1000000);
+    pos32 = (int32_t) *_pwmc[c][PWM_CH_POS];
+    pos = (int64_t) pos32;
+    pos *= 1000;
+    tt = *_pwmc[c][PWM_CH_P_T0] + *_pwmc[c][PWM_CH_P_T1];
 
-    switch ( *_pwmc[c][PWM_CH_STATE] ) {
-        case PWM_CH_STATE_P0: { t = *_pwmc[c][PWM_CH_P_T1]; break; }
-        case PWM_CH_STATE_P1: { t = *_pwmc[c][PWM_CH_P_T0]; break; }
-    }
-
-    if ( t ) {
-        a = ((int64_t)1000000)
-          * (t + ((int64_t)(*_pwmd[PWM_TIMER_TICK] - *_pwmc[c][PWM_CH_TICK])))
-          / ((int64_t)(*_pwmc[c][PWM_CH_P_T0] + *_pwmc[c][PWM_CH_P_T1]));
-        a = *_pwmc[c][PWM_CH_D] ? -a : a;
+    if ( tt &&
+         ( *_pwmc[c][PWM_CH_STATE] == PWM_CH_STATE_P0 ||
+           *_pwmc[c][PWM_CH_STATE] == PWM_CH_STATE_P1 )
+    ) {
+        tc = *_pwmd[PWM_TIMER_TICK] - *_pwmc[c][PWM_CH_P_TICK];
+        if ( tc > tt ) tc = tt;
+        a = 1000 * tc / tt;
+        a = *_pwmc[c][PWM_CH_D] ? 1000 - a : a - 1000;
     }
 
     _pwm_spin_unlock();
