@@ -821,11 +821,11 @@ void pwm_read(void *arg, long period)
             ph.counts = (int32_t) pwm_ch_data_get(ch, PWM_CH_POS, 1);
             pp.counts = (int32_t) (ph.pos_scale * ph.pos_cmd);
             // say `it's ok` to HAL until feedback error is small
-            if ( abs(pp.counts - ph.counts) < 100 ) {
+            if ( abs(pp.counts - ph.counts) < 10 ) {
                 ph.counts = pp.counts;
                 ph.pos_fb = ph.pos_cmd;
             } else {
-                ph.pos_fb = ((hal_float_t)ph.counts) / ph.pos_scale;
+                ph.pos_fb = ((hal_float_t)pwm_ch_pos_get(ch,1)) / ph.pos_scale / 1000;
             }
 #endif
 #if PWM_READ_TEST
@@ -833,7 +833,7 @@ void pwm_read(void *arg, long period)
             ph.pos_fb = ph.pos_cmd;
 #endif
         } else {
-            ph.pos_fb = ((hal_float_t)ph.counts) / ph.pos_scale;
+            ph.pos_fb = ((hal_float_t)pwm_ch_pos_get(ch,1)) / ph.pos_scale / 1000;
         }
     }
 }
