@@ -796,9 +796,9 @@ void pwm_pins_update(uint8_t ch)
                                      ph.dir_port, ph.dir_pin, ph.dir_inv, 1);
 }
 
-#define PWM_READ_SOFT 0
+#define PWM_READ_SOFT 1
 #define PWM_READ_HARD 0
-#define PWM_READ_TEST 1
+#define PWM_READ_TEST 0
 
 static
 void pwm_read(void *arg, long period)
