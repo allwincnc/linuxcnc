@@ -94,6 +94,8 @@ typedef struct
     hal_float_t *vel_scale; // io
 
     hal_float_t *freq_cmd; // io
+    hal_float_t *freq_min; // io
+    hal_float_t *freq_max; // io
 
     hal_float_t *dc_fb; // out
     hal_float_t *pos_fb; // out
@@ -131,6 +133,8 @@ typedef struct
     hal_float_t vel_scale; // io
 
     hal_float_t freq_cmd; // io
+    hal_float_t freq_min; // io
+    hal_float_t freq_max; // io
 
     hal_float_t dc_fb; // out
     hal_float_t pos_fb; // out
@@ -140,6 +144,8 @@ typedef struct
 
     hal_u32_t ctrl_type;
     hal_s32_t freq_mHz;
+    hal_u32_t freq_min_mHz;
+    hal_u32_t freq_max_mHz;
     hal_s32_t dc_s32;
 }
 pwm_ch_priv_t;
@@ -447,6 +453,8 @@ int32_t malloc_and_export(const char *comp_name, int32_t comp_id)
             EXPORT_PIN(HAL_IN,float,vel_cmd,"vel-cmd", 0.0);
 
             EXPORT_PIN(HAL_IO,float,freq_cmd,"freq-cmd", 0.0);
+            EXPORT_PIN(HAL_IO,float,freq_min,"freq-min", 50.0);
+            EXPORT_PIN(HAL_IO,float,freq_max,"freq-max", 500000.0);
 
             EXPORT_PIN(HAL_OUT,float,dc_fb,"dc-fb", 0.0);
             EXPORT_PIN(HAL_OUT,float,pos_fb,"pos-fb", 0.0);
@@ -456,6 +464,8 @@ int32_t malloc_and_export(const char *comp_name, int32_t comp_id)
 
             pp.ctrl_type = type[ch];
             pp.freq_mHz = 0;
+            pp.freq_min_mHz = 50000;
+            pp.freq_max_mHz = 500000000;
             pp.dc_s32 = 0;
         }
         if ( r ) {
@@ -673,7 +683,7 @@ int32_t pwm_get_new_dc(uint8_t ch)
     return (int32_t) (ph.dc_fb * INT32_MAX);
 }
 
-#define PWM_FREQ_UPDATE_FLOAT 1
+#define PWM_FREQ_UPDATE_MPULSES 1
 #define PWM_FREQ_UPDATE_SOFT 0
 #define PWM_FREQ_UPDATE_HARD 0
 #define PWM_FREQ_UPDATE_TEST 0
@@ -683,10 +693,19 @@ int32_t pwm_get_new_freq(uint8_t ch, long period)
 {
     int32_t freq = 0;
 
+    if ( pp.freq_min != ph.freq_min ) {
+        pp.freq_min_mHz = (hal_u32_t) round(ph.freq_min * 1000);
+        pp.freq_min = ph.freq_min;
+    }
+    if ( pp.freq_max != ph.freq_max ) {
+        pp.freq_max_mHz = (hal_u32_t) round(ph.freq_max * 1000);
+        pp.freq_max = ph.freq_max;
+    }
+
     switch ( pp.ctrl_type )
     {
         case PWM_CTRL_BY_POS: {
-#if PWM_FREQ_UPDATE_FLOAT
+#if PWM_FREQ_UPDATE_MPULSES
             int64_t pos_cmd_64 = (int64_t) (ph.pos_cmd * ph.pos_scale * 1000);
             int64_t pos_fdb_64 = pwm_ch_pos_get(ch,1);
             int64_t task_64 = pos_cmd_64 - pos_fdb_64;
@@ -719,8 +738,8 @@ int32_t pwm_get_new_freq(uint8_t ch, long period)
             freq = (int32_t) ((ph.pos_cmd - pp.pos_cmd) * ph.pos_scale * rtapi_clock_set_period(0));
             pp.pos_cmd = ph.pos_cmd;
 #endif
-            if ( abs(freq) < 50000 ) freq = 0;
-            else if ( abs(freq) > 500000000 ) freq = 500000000 * (freq < 0 ? -1 : 1);
+            if ( abs(freq) < pp.freq_min_mHz ) freq = 0;
+            else if ( abs(freq) > pp.freq_max_mHz ) freq = pp.freq_max_mHz * (freq < 0 ? -1 : 1);
             break;
         }
         case PWM_CTRL_BY_VEL: {
@@ -736,6 +755,8 @@ int32_t pwm_get_new_freq(uint8_t ch, long period)
             }
             if ( ph.vel_scale < 1e-20 && ph.vel_scale > -1e-20 ) ph.vel_scale = 1.0;
             freq = (int32_t) round(ph.vel_scale * ph.vel_cmd * 1000);
+            if ( abs(freq) < pp.freq_min_mHz ) freq = 0;
+            else if ( abs(freq) > pp.freq_max_mHz ) freq = pp.freq_max_mHz * (freq < 0 ? -1 : 1);
             ph.vel_fb = ((hal_float_t) freq) / ph.vel_scale / 1000;
             break;
         }
@@ -747,6 +768,8 @@ int32_t pwm_get_new_freq(uint8_t ch, long period)
             pp.freq_cmd = ph.freq_cmd;
             if ( ph.freq_cmd < 1e-20 && ph.freq_cmd > -1e-20 ) break;
             freq = (int32_t) round(ph.freq_cmd * 1000);
+            if ( abs(freq) < pp.freq_min_mHz ) freq = 0;
+            else if ( abs(freq) > pp.freq_max_mHz ) freq = pp.freq_max_mHz * (freq < 0 ? -1 : 1);
             break;
         }
     }
@@ -822,7 +845,7 @@ void pwm_write(void *arg, long period)
     for ( ch = pwm_ch_cnt; ch--; ) {
         if ( !ph.enable ) continue;
         pwm_pins_update(ch);
-//        pwm_ch_data_set(ch, PWM_CH_WATCHDOG, 1000, 1);
+        pwm_ch_data_set(ch, PWM_CH_WATCHDOG, 1000, 1);
         dc = pwm_get_new_dc(ch);
         f = pwm_get_new_freq(ch, period);
         if ( pp.freq_mHz != f || pp.dc_s32 != dc ) {
