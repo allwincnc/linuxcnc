@@ -696,7 +696,7 @@ int32_t pwm_ch_times_setup (
 static inline
 int64_t pwm_ch_pos_get(uint32_t c, uint32_t safe)
 {
-    int64_t pos = 0, a = 0, t = 0;
+    int64_t pos = 0, a = 0;
     int32_t pos32;
     uint32_t tc, tt;
 
