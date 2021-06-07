@@ -1,0 +1,14 @@
+loadrt threads name1=srv period1=1000000
+loadrt arisc encoders=1
+
+addf arisc.encoder.read srv
+
+setp arisc.encoder.0.A-port 0 # PA
+setp arisc.encoder.0.A-pin 12
+setp arisc.encoder.0.B-port 0 # PA
+setp arisc.encoder.0.B-pin 11
+setp arisc.encoder.0.enable 1
+
+start
+
+show pin arisc.encoder
